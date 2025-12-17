@@ -1,32 +1,50 @@
 import pandas as pd
+import json
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "shared-data"))
 
-INPUT_FILE = os.path.join(SHARED_DATA_DIR, "nodes_scored.csv")
+NODES_FILE = os.path.join(SHARED_DATA_DIR, "nodes_scored.csv")
+TX_FILE = os.path.join(SHARED_DATA_DIR, "transactions.csv")
 OUTPUT_FILE = os.path.join(SHARED_DATA_DIR, "nodes_viz.json")
 
 def prepare_viz_data():
-    df = pd.read_csv(INPUT_FILE)
+    nodes_df = pd.read_csv(NODES_FILE)
+    tx_df = pd.read_csv(TX_FILE)
 
-    df["color"] = df["anomaly_score"].apply(
-        lambda x: "red" if x > 0 else "green"
-    )
+    # ---------- Nodes ----------
+    nodes = []
+    for _, row in nodes_df.iterrows():
+        anomaly_score = float(row["anomaly_score"])
 
-    df["size"] = (df["total_incoming"] + df["total_outgoing"]) ** 0.5
-    df["height"] = df["anomaly_score"] * 10
+        nodes.append({
+            "id": int(row["node_id"]),
+            "color": "red" if row["is_anomalous"] == 1 else "green",
+            "size": round((row["total_incoming"] + row["total_outgoing"]) ** 0.5, 2),
+            "height": round(max(anomaly_score, 0) * 10, 2),  
+            "is_anomalous": int(row["is_anomalous"])
+        })
 
-    viz_df = df[[
-        "node_id",
-        "color",
-        "size",
-        "height",
-        "is_anomalous"
-    ]]
+    # ---------- Links ----------
+    links = []
+    for _, row in tx_df.iterrows():
+        links.append({
+            "source": int(row["source"]),
+            "target": int(row["target"]),
+            "amount": float(row["amount"])
+        })
 
-    viz_df.to_json(OUTPUT_FILE, orient="records")
-    print(f" Visualization data ready → {OUTPUT_FILE}")
+    graph = {
+        "nodes": nodes,
+        "links": links
+    }
+
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(graph, f, indent=2)
+
+    print(f" Visualization graph ready → {OUTPUT_FILE}")
+    print(f" Nodes: {len(nodes)} | Links: {len(links)}")
 
 if __name__ == "__main__":
     prepare_viz_data()
