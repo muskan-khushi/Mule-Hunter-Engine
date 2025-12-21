@@ -1,6 +1,6 @@
 # 🔍 Visual Analytics — Mule Hunter
 
-Live Demo: **https://mule-hunter-viz-latest.onrender.com/**
+Live Demo: **https://fraud-viz-latest.onrender.com/**
 
 Visual Analytics is the forensic visualization and explainability module of the Mule Hunter platform.  
 It transforms anomaly detection results into an interactive, explainable 3D graph experience for fast, meaningful insights.
