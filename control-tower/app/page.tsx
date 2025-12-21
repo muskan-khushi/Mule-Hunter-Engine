@@ -1,6 +1,6 @@
 "use client";
 import Navbar from "./components/Navbar";
-import {Check,Network,AlertTriangle,Brain,UserX,Activity,Lightbulb} from "lucide-react";
+import {Check,Network,AlertTriangle,Brain,UserX,Activity,Lightbulb,ArrowLeftRight,GitBranch,FileSearch} from "lucide-react";
 import {
   IndianRupee,
   Banknote,
@@ -186,19 +186,19 @@ By combining graph analytics, machine learning, and explainable AI, MuleHunter e
             {/* right content */}
             <div className="grid grid-cols-2 gap-4 py-4 mx-25 my-10 p-2 border border-gray-900 rounded-2xl font-bold">
               <div className="flex flex-col items-center justify-center gap-5 text-xs p-2 border border-gray-900 rounded-2xl ml-6">
-                <UserX className="w-5 text-[#caff33]"/>
+                <FileSearch className="w-5 text-[#caff33]"/>
                 <div className="">Mule Account Identification</div>
               </div>
                <div className="flex flex-col items-center justify-center gap-5 text-xs p-2 border border-gray-900 rounded-2xl mr-6">
-                <Network className="w-5 text-[#caff33]"/>
+                <ArrowLeftRight className="w-5 text-[#caff33]"/>
                 <div className="">Collusive Ring Detection</div>
               </div>
                <div className="flex flex-col items-center justify-center gap-5 text-xs p-2 border border-gray-900 rounded-2xl ml-6 ">
-                <Activity className="w-5 text-[#caff33]"/>
+                <GitBranch className="w-5 text-[#caff33]"/>
                 <div className="">Transaction Anomaly Detection</div>
               </div>
                <div className="flex flex-col items-center justify-center gap-5 text-xs p-2 border border-gray-900 rounded-2xl mr-6">
-                <Lightbulb className="w-5 text-[#caff33]"/>
+                <Brain className="w-5 text-[#caff33]"/>
                 <div className="">Explainable Fraud Decisions</div>
               </div>
                
@@ -207,7 +207,7 @@ By combining graph analytics, machine learning, and explainable AI, MuleHunter e
             
             
             
-            <div></div>
+            
            </div>
       </div>
 
