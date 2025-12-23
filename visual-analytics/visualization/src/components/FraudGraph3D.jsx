@@ -14,15 +14,30 @@ export default function FraudGraph3D({
   const [activeNodeId, setActiveNodeId] = useState(null);
 
   useEffect(() => {
-    fetch("./nodes_viz.json")
-      .then((res) => {
+    const controller = new AbortController();
+
+    async function loadGraph() {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_BACKEND_URL}/api/graph`,
+          { signal: controller.signal }
+        );
+
         if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
+          throw new Error(`Backend error ${res.status}`);
         }
-        return res.json();
-      })
-      .then((data) => setRawGraph(data))
-      .catch((err) => console.error("Could not load graph data:", err));
+
+        const data = await res.json();
+        setRawGraph(data);
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          console.error("Could not load graph data:", err);
+        }
+      }
+    }
+
+    loadGraph();
+    return () => controller.abort();
   }, []);
 
   const visibleGraph = useMemo(() => {
