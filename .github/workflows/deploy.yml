@@ -43,10 +43,10 @@ jobs:
             mkdir -p ~/control-tower
             cd ~/control-tower
 
-            # 2. Login to Docker Hub on EC2
+            # 2. Login to Docker Hub
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
-            # 3. Create the docker-compose.yml
+            # 3. Create/Update docker-compose.yml
             cat <<EOF > docker-compose.yml
             services:
               next-app:
@@ -62,7 +62,8 @@ jobs:
                 restart: always
             EOF
 
-            # 4. Pull and Restart
-            # We add --quiet to pull and use 'docker-compose up -d' with no-deps
-            docker-compose pull
-            docker-compose up -d --force-recreate
+            # 4. Cleanup old broken state and start fresh
+            # Using 'docker compose' (the modern plugin) instead of 'docker-compose'
+            docker compose down --remove-orphans
+            docker compose pull
+            docker compose up -d
