@@ -1,0 +1,56 @@
+name: Deploy Control Tower
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'control-tower/**' # Trigger only if this folder changes
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./control-tower
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/control-tower:latest
+          build-args: |
+            MONGODB_URI=${{ secrets.MONGODB_URI }}
+            AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+            AUTH_URL=${{ secrets.AUTH_URL }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH to EC2 and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Create app directory if not exists
+            mkdir -p ~/control-tower
+            cd ~/control-tower
+            
+            # Export secrets for docker-compose to use
+            export DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            export MONGODB_URI=${{ secrets.MONGODB_URI }}
+            export AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+            export AUTH_URL=${{ secrets.AUTH_URL }}
+
+            # Pull the new image and restart
+            docker compose pull
+            docker compose up -d

@@ -1,15 +1,27 @@
 services:
   next-app:
+    # Docker will look for this name locally first
+    image: ${DOCKERHUB_USERNAME}/control-tower:latest
+    container_name: control-tower-app
     build:
       context: .
       dockerfile: Dockerfile
       args:
         - MONGODB_URI=${MONGODB_URI}
         - AUTH_SECRET=${AUTH_SECRET}
+        - AUTH_URL=${AUTH_URL}
     ports:
       - "3000:3000"
-    env_file:
-      - .env.local
     environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_URL=${AUTH_URL}
       - NODE_ENV=production
     restart: always
+
+
+
+
+
+# sudo docker compose --env-file .env.local build
+# sudo docker compose --env-file .env.local up -d --build
