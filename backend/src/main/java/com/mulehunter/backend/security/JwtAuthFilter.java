@@ -34,25 +34,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     String token = header.substring(7);
 
     try {
-      Claims claims = Jwts.parser()
-          .setSigningKey(jwtSecret.getBytes())
-          .parseClaimsJws(token)
-          .getBody();
+    Claims claims = Jwts.parserBuilder()
+        .setSigningKey(jwtSecret.getBytes())
+        .build()
+        .parseClaimsJws(token)
+        .getBody();
 
-      String role = claims.get("role", String.class);
+    // ✅ DEFINE role FIRST
+    String role = claims.get("role", String.class);
 
-      if (role == null || !(role.equals("ADMIN") || role.equals("ANALYST"))) {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        return;
-      }
+    // ✅ NOW this line is valid
+    request.setAttribute("role", role);
 
-      // Optionally make role available to controllers
-      request.setAttribute("role", role);
+} catch (Exception e) {
+    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    return;
+}
 
-    } catch (Exception e) {
-      response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-      return;
-    }
 
     filterChain.doFilter(request, response);
   }

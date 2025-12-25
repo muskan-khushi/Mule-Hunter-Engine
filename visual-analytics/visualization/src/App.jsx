@@ -4,7 +4,8 @@ import NodeInspector from "./components/NodeInspector";
 
 function App() {
   const [selectedNode, setSelectedNode] = useState(null);
-  const [token, setToken] = (useState < string) | (null > null);
+  const [token, setToken] = useState(null);
+
   const [loading, setLoading] = useState(true);
 
   async function getRoleToken() {
