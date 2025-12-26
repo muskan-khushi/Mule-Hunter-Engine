@@ -27,6 +27,7 @@ public class ShapExplanationController {
 
     @PostMapping("/batch")
     public Mono<String> saveBatch(@RequestBody List<ShapExplanationDTO> payload) {
+        System.out.println("📥 SHAP payload = " + payload);
 
         return Flux.fromIterable(payload)
                 .flatMap(dto -> repository.findByNodeId(dto.getNodeId())

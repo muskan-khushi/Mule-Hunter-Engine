@@ -9,9 +9,9 @@ from app.services.node_pipeline import run_node_pipeline
 router = APIRouter()
 
 
-# =========================
+
 # REQUEST MODELS
-# =========================
+
 
 class NodePayload(BaseModel):
     nodeId: int
@@ -24,17 +24,17 @@ class VisualReanalyzeRequest(BaseModel):
     nodes: List[NodePayload]
 
 
-# =========================
+
 # BACKGROUND RUNNER
-# =========================
+
 
 def _run_pipeline_sync(nodes: List[NodePayload]):
     asyncio.run(run_node_pipeline(nodes))
 
 
-# =========================
+
 # NODE-BASED ENTRY POINT
-# =========================
+
 
 @router.post(
     "/visual/reanalyze/nodes",

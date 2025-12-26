@@ -7,7 +7,7 @@ public class ShapExplanationDTO {
 
     private Long nodeId;
     private Double anomalyScore;
-    private List<Map<String, Double>> topFactors;
+    private List<Map<String, Object>> topFactors;
     private String model;
     private String source;
 
@@ -22,19 +22,19 @@ public class ShapExplanationDTO {
         this.nodeId = nodeId;
     }
 
-    public double getAnomalyScore() {
+    public Double getAnomalyScore() {
         return anomalyScore;
     }
 
-    public void setAnomalyScore(double anomalyScore) {
+    public void setAnomalyScore(Double anomalyScore) {
         this.anomalyScore = anomalyScore;
     }
 
-    public List<Map<String, Double>> getTopFactors() {
+    public List<Map<String, Object>> getTopFactors() {
         return topFactors;
     }
 
-    public void setTopFactors(List<Map<String, Double>> topFactors) {
+    public void setTopFactors(List<Map<String, Object>> topFactors) {
         this.topFactors = topFactors;
     }
 

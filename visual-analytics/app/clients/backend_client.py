@@ -3,9 +3,8 @@ import httpx
 from app.config import BACKEND_BASE_URL, REQUEST_TIMEOUT
 
 
-# =============================
 # INTERNAL SAFE POST
-# =============================
+
 
 async def _post_safe(url: str, data):
     """
@@ -20,9 +19,9 @@ async def _post_safe(url: str, data):
         logging.error(f"POST failed → {url} | {e}")
 
 
-# =============================
+
 # READ (NODE-SCOPED)
-# =============================
+
 
 async def fetch_all_enriched_nodes():
     """
@@ -53,30 +52,28 @@ async def fetch_all_enriched_nodes():
 async def post_anomaly_score(node_id: int, score: float):
     await _post_safe(
         f"{BACKEND_BASE_URL}/backend/api/visual/anomaly-scores/batch",
-    [
-
-        {
+        [{
             "nodeId": node_id,
             "anomalyScore": score,
+            "isAnomalous": 1 if score > 0 else 0,   
             "model": "eif_v1",
             "source": "visual-analytics"
-        }
-    ]
-)
+        }]
+    )
 
-async def post_shap_explanation(node_id: int, payload: dict):
+
+async def post_shap_explanation(payload: dict):
     await _post_safe(
         f"{BACKEND_BASE_URL}/backend/api/visual/shap-explanations/batch",
-        [
-            {
-                "nodeId": node_id,
-                "anomalyScore": payload["anomalyScore"],
-                "topFactors": payload["topFactors"],
-                "model": "shap_v1",
-                "source": "visual-analytics"
-            }
-        ]
+        [{
+            "nodeId": payload["node_id"],
+            "anomalyScore": payload["anomaly_score"],
+            "topFactors": payload["top_factors"],
+            "model": payload.get("model", "shap_v1"),
+            "source": payload.get("source", "visual-analytics"),
+        }]
     )
+
 
 
 

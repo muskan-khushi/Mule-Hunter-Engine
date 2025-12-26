@@ -7,6 +7,7 @@ import com.mulehunter.backend.model.TransactionRequest;
 import com.mulehunter.backend.repository.TransactionRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import reactor.core.publisher.Mono;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.Instant;
 import java.util.List;
@@ -23,6 +24,9 @@ public class TransactionService {
     private final TransactionRepository repository;
     private final NodeEnrichedService nodeEnrichedService;
     private final WebClient webClient;
+
+    @Value("${visual.internal-api-key}")
+    private String visualInternalApiKey;
 
     public TransactionService(TransactionRepository repository, NodeEnrichedService nodeEnrichedService) {
         this.repository = repository;
@@ -49,32 +53,9 @@ public class TransactionService {
                         nodeEnrichedService.handleIncoming(targetNodeId, amount))
                         // 3. Call AI Model
                         .then(callAiModel(sourceNodeId, targetNodeId, amount))
-                        .flatMap(aiResponse -> {
-                            triggerVisualMlPipeline(savedTx).subscribe();
-                            // 4. Process AI Verdict
-                            if (aiResponse != null && aiResponse.has("risk_score")) {
-                                double riskScore = aiResponse.get("risk_score").asDouble();
-                                String verdict = aiResponse.get("verdict").asText();
+                        .flatMap(aiResponse -> triggerVisualMlPipeline(savedTx)
+                                .then(processAiResponse(savedTx, aiResponse))));
 
-                                System.out.println("🤖 AI ORCHESTRATOR :: Transaction ID " + savedTx.getId() +
-                                        " | Risk Score: " + riskScore + " | Verdict: " + verdict);
-
-                                // Save the Score and Verdict to the Database object
-                                savedTx.setRiskScore(riskScore);
-                                savedTx.setVerdict(verdict);
-
-                                // Flag as fraud if score is high
-                                if (riskScore > 0.5) {
-                                    savedTx.setSuspectedFraud(true);
-                                } else {
-                                    savedTx.setSuspectedFraud(false);
-                                }
-
-                                // Save the updated object back to the DB
-                                return repository.save(savedTx);
-                            }
-                            return Mono.just(savedTx);
-                        }));
     }
 
     private Mono<JsonNode> callAiModel(Long source, Long target, double amount) {
@@ -106,7 +87,7 @@ public class TransactionService {
 
         return webClient.post()
                 .uri("/visual/reanalyze/nodes")
-                .header("X-INTERNAL-API-KEY", "SECRET_KEY")
+                .header("X-INTERNAL-API-KEY", visualInternalApiKey)
                 .bodyValue(payload)
                 .retrieve()
                 .bodyToMono(Void.class)
@@ -114,6 +95,28 @@ public class TransactionService {
                     System.err.println("VISUAL ML PIPELINE TRIGGER FAILED: " + e.getMessage());
                     return Mono.empty();
                 });
+    }
+
+    private Mono<Transaction> processAiResponse(Transaction tx, JsonNode aiResponse) {
+
+        if (aiResponse != null && aiResponse.has("risk_score")) {
+
+            double riskScore = aiResponse.get("risk_score").asDouble();
+            String verdict = aiResponse.get("verdict").asText();
+
+            System.out.println(
+                    "🤖 AI ORCHESTRATOR :: Transaction ID " + tx.getId()
+                            + " | Risk Score: " + riskScore
+                            + " | Verdict: " + verdict);
+
+            tx.setRiskScore(riskScore);
+            tx.setVerdict(verdict);
+            tx.setSuspectedFraud(riskScore > 0.5);
+
+            return repository.save(tx);
+        }
+
+        return Mono.just(tx);
     }
 
 }

@@ -5,9 +5,9 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 
-# =====================================================
+
 # CONFIG
-# =====================================================
+
 
 FEATURE_COLS = [
     "in_degree",
@@ -20,9 +20,9 @@ FEATURE_COLS = [
 MIN_POPULATION_SIZE = 10
 
 
-# =====================================================
+
 # TRAINING
-# =====================================================
+
 
 def train_isolation_forest(
     reference_nodes: List[Dict],
@@ -68,6 +68,7 @@ def train_isolation_forest(
         random_state=42,
         n_jobs=-1,
     )
+    
 
     model.fit(X_scaled)
 
@@ -115,6 +116,9 @@ def score_nodes(
     preds = model.predict(X_scaled)
 
     results = []
+    print("📉 Raw IF scores:", anomaly_scores[:5])
+    print("📉 Predictions:", preds[:5])
+
 
     for i in range(len(df)):
         results.append({

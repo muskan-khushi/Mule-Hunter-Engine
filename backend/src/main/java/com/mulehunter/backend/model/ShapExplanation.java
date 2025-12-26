@@ -15,31 +15,67 @@ public class ShapExplanation {
 
     private Long nodeId;
     private double anomalyScore;
-    private List<Map<String, Double>> topFactors;
+    private List<Map<String, Object>> topFactors;
     private String model;
     private String source;
     private Instant updatedAt;
 
-    public ShapExplanation() {}
+    public ShapExplanation() {
+    }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public String getId() {
+        return id;
+    }
 
-    public Long getNodeId() { return nodeId; }
-    public void setNodeId(Long nodeId) { this.nodeId = nodeId; }
+    public void setId(String id) {
+        this.id = id;
+    }
 
-    public double getAnomalyScore() { return anomalyScore; }
-    public void setAnomalyScore(double anomalyScore) { this.anomalyScore = anomalyScore; }
+    public Long getNodeId() {
+        return nodeId;
+    }
 
-    public List<Map<String, Double>> getTopFactors() { return topFactors; }
-    public void setTopFactors(List<Map<String, Double>> topFactors) { this.topFactors = topFactors; }
+    public void setNodeId(Long nodeId) {
+        this.nodeId = nodeId;
+    }
 
-    public String getModel() { return model; }
-    public void setModel(String model) { this.model = model; }
+    public double getAnomalyScore() {
+        return anomalyScore;
+    }
 
-    public String getSource() { return source; }
-    public void setSource(String source) { this.source = source; }
+    public void setAnomalyScore(double anomalyScore) {
+        this.anomalyScore = anomalyScore;
+    }
 
-    public Instant getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public List<Map<String, Object>> getTopFactors() {
+        return topFactors;
+    }
+
+    public void setTopFactors(List<Map<String, Object>> topFactors) {
+        this.topFactors = topFactors;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
+    }
 }

@@ -7,5 +7,7 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      SPRING_DATA_MONGODB_URI: mongodb+srv://prisha:Prisha123@cluster0.pjwljsk.mongodb.net/test
-      AI_SERVICE_URL: "http://host.docker.internal:8000"
+      JWT_SECRET: ${JWT_SECRET}
+      AI_SERVICE_URL: ${AI_SERVICE_URL}
+      SPRING_DATA_MONGODB_URI: ${SPRING_DATA_MONGODB_URI}
+      VISUAL_INTERNAL_API_KEY: ${VISUAL_INTERNAL_API_KEY}
