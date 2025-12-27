@@ -76,7 +76,7 @@ async def run_node_pipeline(nodes: List):
         if n.get("nodeId") is not None
     ]
 
-    print("🔍 Total enriched nodes fetched:", len(all_nodes))
+    print(" Total enriched nodes fetched:", len(all_nodes))
 
     for node in nodes:
         node_id = None
@@ -103,14 +103,14 @@ async def run_node_pipeline(nodes: List):
             if len(reference_nodes) < 10:
                 continue
 
-            # 🔑 CORRECT ML CALL
+            #   ML CALL
             score, is_anomalous = score_single_node(
                 enriched_node=target_node,
                 reference_nodes=reference_nodes
             )
 
             print(
-                f"✅ FINAL DECISION | node={node_id} "
+                f" FINAL DECISION | node={node_id} "
                 f"score={score:.6f} "
                 f"isAnomalous={is_anomalous}"
             )
@@ -120,11 +120,11 @@ async def run_node_pipeline(nodes: List):
 
             # SHAP
             if is_anomalous:
-                print("🧠 RUNNING SHAP for node:", node_id)
+                print(" RUNNING SHAP for node:", node_id)
                 shap_input = []
 
                 #  Add NORMAL reference nodes
-                for n in reference_nodes[:300]:  # cap size
+                for n in reference_nodes[:300]:  
                     shap_input.append({
                         **n,
                         "is_anomalous": 0,
@@ -138,11 +138,11 @@ async def run_node_pipeline(nodes: List):
                     "anomaly_score": score,
                 })
 
-                print("🧪 SHAP INPUT SIZE =", len(shap_input))
-                print("🧪 SHAP y.sum() =", sum(x["is_anomalous"] for x in shap_input))
+                print(" SHAP INPUT SIZE =", len(shap_input))
+                print(" SHAP y.sum() =", sum(x["is_anomalous"] for x in shap_input))
 
                 shap_results = run_shap(shap_input)
-                print("🧪 SHAP RESULTS RAW =", shap_results)
+                print(" SHAP RESULTS RAW =", shap_results)
 
 
             else:
@@ -163,7 +163,7 @@ async def run_node_pipeline(nodes: List):
                     "source": "visual-analytics",
                 })
 
-            print(f"✅ Visual ML completed for node {node_id}")
+            print(f" Visual ML completed for node {node_id}")
 
         except Exception as e:
-            print(f"❌ Visual ML failed for node {node_id}: {str(e)}")
+            print(f" Visual ML failed for node {node_id}: {str(e)}")

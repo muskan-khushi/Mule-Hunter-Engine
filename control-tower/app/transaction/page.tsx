@@ -106,43 +106,126 @@ const sendTransaction = async () => {
           </div>
 
           {/* RIGHT PANEL */}
+         
           <div className="border border-gray-800 rounded-2xl p-6 flex flex-col h-full bg-[#0A0A0A]">
             <h2 className="text-xl font-bold mb-6 shrink-0">
               AI Decision Panel
             </h2>
 
-            <div className="flex-1 overflow-y-auto pr-2">
-              {!result && (
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+
+              {/* {!result && (
                 <div className="h-full flex items-center justify-center border-2 border-dashed border-gray-800 rounded-xl">
-                    <p className="text-gray-500 italic">
-                        Submit a transaction to trigger AI analysis
-                    </p>
+                  <p className="text-gray-500 italic">
+                    Submit a transaction to trigger AI analysis
+                  </p>
                 </div>
-              )}
+              )} */}
 
               {result && (
-                <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-2">
+                <>
+                  {/* 🧬 CARD 1 — Unsupervised ML*/}
                   <div className="p-4 bg-gray-900 rounded-xl border border-gray-800">
-                    <div className="text-sm text-gray-400">Risk Score</div>
-                    <div className={`text-3xl font-bold ${result.risk_score > 70 ? 'text-red-500' : 'text-yellow-500'}`}>
-                      {result.risk_score}
+                    <h3 className="font-semibold mb-2 text-[#caff33]">
+                      🧬 Feature Engineering
+                    </h3>
+
+                    <p className="text-sm text-gray-400 mb-2">
+                      Graph-based features constructed for this account
+                    </p>
+
+                    <div className="text-xs text-gray-300 space-y-1">
+                      <div>Out-degree: {result.features.before.out_degree} → {result.features.after.out_degree}</div>
+                      <div>Risk Ratio: {result.features.before.risk_ratio} → {result.features.after.risk_ratio}</div>
+                      <div>Compared against {result.features.populationSize} accounts</div>
                     </div>
                   </div>
 
+                  {/* 🟠 CARD 2 — JA3 Device fingerprinting */}
+
                   <div className="p-4 bg-gray-900 rounded-xl border border-gray-800">
-                    <div className="text-sm text-gray-400 mb-2">
-                      Why flagged?
-                    </div>
-                    <ul className="list-disc list-inside text-sm text-gray-300 space-y-2">
-                      {result.reasons?.map((r: string, i: number) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
+                    <h3 className="font-semibold mb-2 text-red-400">
+                      🔗 Device & Pattern Correlation
+                    </h3>
+
+                    {!result.correlation.ja3Detected ? (
+                      <p className="text-sm text-gray-400">
+                        No shared device fingerprint or coordinated activity detected.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-sm text-gray-300">
+                          Shared device fingerprint detected across accounts:
+                        </p>
+                        <ul className="list-disc list-inside text-sm text-red-300 mt-2">
+                          {result.correlation.linkedAccounts.map((a: string, i: number) => (
+                            <li key={i}>{a}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                   </div>
-                </div>
+                   {/* 🔗Supervised Model */}
+                  <div className="p-4 bg-gray-900 rounded-xl border border-gray-800">
+                    <h3 className="font-semibold mb-2 text-orange-400">
+                      🟠 Behavioral Anomaly Detection
+                    </h3>
+
+                    <p className="text-sm text-gray-400">
+                      Model: {result.unsupervised.model}
+                    </p>
+
+                    <div className="mt-2 text-sm">
+                      Anomaly Score:{" "}
+                      <span className="font-bold">
+                        {result.unsupervised.score}
+                      </span>
+                    </div>
+
+                    <div className={`mt-1 text-sm font-semibold ${
+                      result.unsupervised.isAnomalous
+                        ? "text-red-500"
+                        : "text-green-400"
+                    }`}>
+                      {result.unsupervised.isAnomalous
+                        ? "Anomalous Behavior Detected"
+                        : "Behavior Within Normal Range"}
+                    </div>
+                  </div>
+
+                 
+                  
+
+                  {/* 🚨 CARD 4 — Final Decision */}
+                  <div className="p-4 bg-gray-900 rounded-xl border border-gray-800">
+                    <h3 className="font-semibold mb-2 text-red-500">
+                      🚨 Final Risk Assessment
+                    </h3>
+
+                    <div className="text-sm text-gray-300">
+                      Risk Level:{" "}
+                      <span className="font-bold">{result.final.riskLevel}</span>
+                    </div>
+
+                    <div className="text-sm text-gray-400 mt-1">
+                      Confidence: {result.final.confidence}
+                    </div>
+
+                    <div className="mt-3 flex gap-3">
+                      <button className="px-3 py-1 rounded-md bg-[#caff33] text-black text-sm font-semibold">
+                        Generate Report
+                      </button>
+
+                      <button className="px-3 py-1 rounded-md border border-gray-700 text-sm">
+                        View in Graph
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
+
 
         </div>
       </main>

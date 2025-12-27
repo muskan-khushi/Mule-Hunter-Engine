@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  visual-analytics:
+    container_name: visual-analytics
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env  
+    ports:
+      - "8000:8000"
+    environment:  
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    volumes:
+      # Hot reload data / explanations / models if needed
+      - ./visualization:/app/visualization
+      - ./scripts:/app/scripts
+    restart: unless-stopped
