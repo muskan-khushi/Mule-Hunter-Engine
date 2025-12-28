@@ -47,7 +47,7 @@ export default function FakeTransactionPage() {
 
     try {
       // ================= TRANSACTION (POST to Java -> Python) =================
-      const txResponse = await fetch("http://localhost:8080/api/transactions", {
+      const txResponse = await fetch("http://51.20.82.63:8082/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(transactionData),
