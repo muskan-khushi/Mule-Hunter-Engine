@@ -14,7 +14,9 @@ public class CorsConfig {
             public void addCorsMappings(CorsRegistry registry) {
                 // Allow Frontend (Port 3000) to talk to Backend (Port 8080)
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:3000") 
+                        .allowedOrigins("http://localhost:3000",
+                        "http://13.61.154.100") 
+
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .allowCredentials(true);
