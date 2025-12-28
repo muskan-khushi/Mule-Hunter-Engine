@@ -10,7 +10,7 @@ public class CorsConfig implements WebMvcConfigurer {
   @Override
   public void addCorsMappings(CorsRegistry registry) {
     registry.addMapping("/api/**")
-        .allowedOrigins("http://localhost:5173", "https://mule-hunter-h58t.vercel.app", "http://13.48.249.157:3000")
+        .allowedOrigins("http://13.61.154.100/","http://localhost:5173", "https://mule-hunter-h58t.vercel.app", "http://13.48.249.157:3000")
         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
         .allowedHeaders("*")
         .allowCredentials(true);
