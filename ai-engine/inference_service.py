@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import pandas as pd
 from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from torch_geometric.nn import SAGEConv
 from torch_geometric.data import Data
@@ -18,16 +18,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("MuleHunter-Inference")
 
 # =================================================
-# PATHS
+# PATHS (Docker-safe)
 # =================================================
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_DATA = "/app/shared-data"
 
 MODEL_PATH = f"{SHARED_DATA}/mule_model.pth"
 GRAPH_PATH = f"{SHARED_DATA}/processed_graph.pt"
 NODES_PATH = f"{SHARED_DATA}/nodes.csv"
-
-
 
 # =================================================
 # MODEL
@@ -63,10 +60,11 @@ class RiskResponse(BaseModel):
     model_version: str
 
 # =================================================
-# GLOBAL STATE (IMMUTABLE BASE)
+# GLOBAL STATE
 # =================================================
 model: Optional[MuleSAGE] = None
 base_graph: Optional[Data] = None
+
 node_df: Optional[pd.DataFrame] = None
 id_map: dict = {}
 rev_map: dict = {}
@@ -75,7 +73,7 @@ _initialized = False
 _init_lock = Lock()
 
 # =================================================
-# LOAD ASSETS (IDEMPOTENT + THREAD SAFE)
+# LOAD ASSETS (SAFE + OPTIONAL CSV)
 # =================================================
 def load_assets():
     global model, base_graph, node_df, id_map, rev_map, _initialized
@@ -89,27 +87,40 @@ def load_assets():
 
         logger.info("🔄 Initializing MuleHunter AI...")
 
-        if not all(os.path.exists(p) for p in [MODEL_PATH, GRAPH_PATH, NODES_PATH]):
-            raise RuntimeError("❌ Missing model or graph assets")
+        # ---- REQUIRED ASSETS
+        if not all(os.path.exists(p) for p in [MODEL_PATH, GRAPH_PATH]):
+            raise RuntimeError("❌ Missing required model or graph assets")
 
+        # ---- LOAD GRAPH
         base_graph = torch.load(
             GRAPH_PATH,
             map_location="cpu",
             weights_only=False
         )
 
-        node_df = pd.read_csv(NODES_PATH)
-        node_df["node_id"] = node_df["node_id"].astype(str)
+        # ---- OPTIONAL nodes.csv
+        if os.path.exists(NODES_PATH):
+            try:
+                node_df = pd.read_csv(NODES_PATH)
+                node_df["node_id"] = node_df["node_id"].astype(str)
 
-        id_map = {nid: i for i, nid in enumerate(node_df["node_id"])}
-        rev_map = {i: nid for nid, i in id_map.items()}
+                id_map = {nid: i for i, nid in enumerate(node_df["node_id"])}
+                rev_map = {i: nid for nid, i in id_map.items()}
 
+                logger.info(f"ℹ️ nodes.csv loaded ({len(node_df)} rows)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load nodes.csv: {e}")
+                node_df = None
+        else:
+            logger.info("ℹ️ nodes.csv not found — running in graph-only mode")
+
+        # ---- LOAD MODEL
         model = MuleSAGE()
         model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
         model.eval()
 
         _initialized = True
-        logger.info(f"✅ AI READY | Nodes Loaded: {len(id_map)}")
+        logger.info(f"✅ AI READY | Graph Nodes: {base_graph.num_nodes}")
 
 # =================================================
 # FASTAPI APP
@@ -128,22 +139,22 @@ app = FastAPI(
 )
 
 # =================================================
-# INFERENCE ENDPOINT (AUTO INIT)
+# INFERENCE ENDPOINT
 # =================================================
 @app.post("/analyze-transaction", response_model=RiskResponse)
 def analyze_transaction(tx: TransactionRequest):
 
-    # 🔥 AUTO INITIALISE IF BACKEND HITS DIRECTLY
     if not _initialized:
         load_assets()
 
-    # ---- local graph copy (safe mutation)
+    # ---- CLONE GRAPH (SAFE)
     x = base_graph.x.clone()
     edge_index = base_graph.edge_index.clone()
 
     # ---- SOURCE NODE
     src_key = str(tx.source_id)
-    if src_key in id_map:
+
+    if node_df is not None and src_key in id_map:
         src_idx = id_map[src_key]
         row = node_df.iloc[src_idx]
 
@@ -157,7 +168,6 @@ def analyze_transaction(tx: TransactionRequest):
 
         x[src_idx] = features
     else:
-        # cold start node
         src_idx = x.size(0)
         features = torch.tensor([
             30.0,
@@ -171,7 +181,8 @@ def analyze_transaction(tx: TransactionRequest):
 
     # ---- TARGET NODE
     tgt_key = str(tx.target_id)
-    if tgt_key in id_map:
+
+    if node_df is not None and tgt_key in id_map:
         tgt_idx = id_map[tgt_key]
     else:
         tgt_idx = x.size(0)
@@ -181,7 +192,7 @@ def analyze_transaction(tx: TransactionRequest):
     new_edge = torch.tensor([[src_idx], [tgt_idx]], dtype=torch.long)
     edge_index = torch.cat([edge_index, new_edge], dim=1)
 
-    # ---- MODEL INFERENCE
+    # ---- INFERENCE
     with torch.no_grad():
         out = model(x, edge_index)
         risk = float(out[src_idx].exp()[1])
