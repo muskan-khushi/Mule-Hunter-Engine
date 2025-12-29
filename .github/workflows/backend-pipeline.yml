@@ -31,11 +31,13 @@ jobs:
             set -e
             cd ~/MULE_HUNTER
             git pull origin main
-            cat <<''EOF'' > .env
-            SPRING_DATA_MONGODB_URI=$SPRING_DATA_MONGODB_URI
-            VISUAL_INTERNAL_API_KEY=$VISUAL_INTERNAL_API_KEY
-            JWT_SECRET=$JWT_SECRET
+
+            cat << 'EOF' > .env
+            SPRING_DATA_MONGODB_URI=${{ secrets.SPRING_DATA_MONGODB_URI }}
+            VISUAL_INTERNAL_API_KEY=${{ secrets.VISUAL_INTERNAL_API_KEY }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
             EOF
+            
             # docker-compose down
             # docker-compose up -d --build 
             echo "Clearing port 8082..."
