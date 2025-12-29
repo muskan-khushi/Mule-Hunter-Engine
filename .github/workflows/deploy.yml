@@ -62,7 +62,7 @@ jobs:
 
             # 3. Create/Update docker-compose.yml
             # Notice the image now uses the specific run number tag
-            cat <<EOF > docker-compose.yml
+            cat <<'EOF' > docker-compose.yml
             services:
               next-app:
                 image: ${{ secrets.DOCKERHUB_USERNAME }}/control-tower:${{ github.run_number }}
