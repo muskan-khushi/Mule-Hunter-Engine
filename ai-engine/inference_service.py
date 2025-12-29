@@ -21,12 +21,13 @@ logger = logging.getLogger("MuleHunter-Inference")
 # PATHS
 # =================================================
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHARED_DATA = os.path.join(ROOT_DIR, "shared-data")
+SHARED_DATA = "/app/shared-data"
+
+MODEL_PATH = f"{SHARED_DATA}/mule_model.pth"
+GRAPH_PATH = f"{SHARED_DATA}/processed_graph.pt"
+NODES_PATH = f"{SHARED_DATA}/nodes.csv"
 
 
-MODEL_PATH = os.path.join(SHARED_DATA, "mule_model.pth")
-GRAPH_PATH = os.path.join(SHARED_DATA, "processed_graph.pt")
-NODES_PATH = os.path.join(SHARED_DATA, "nodes.csv")
 
 # =================================================
 # MODEL
