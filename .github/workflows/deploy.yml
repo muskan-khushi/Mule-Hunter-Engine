@@ -2,7 +2,11 @@ name: Deploy Control Tower
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "control-tower/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy.yml"
 
 jobs:
   build-and-push:
@@ -47,15 +51,18 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             # 1. Prepare Directory
-            mkdir -p ~/control-tower
-            cd ~/control-tower
+            # mkdir -p ~/control-tower
+            # cd ~/control-tower
+
+            mkdir -p ~/control-tower-deploy
+            cd ~/control-tower-deploy
 
             # 2. Login to Docker Hub
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
             # 3. Create/Update docker-compose.yml
             # Notice the image now uses the specific run number tag
-            cat <<EOF > docker-compose.yml
+            cat <<'EOF' > docker-compose.yml
             services:
               next-app:
                 image: ${{ secrets.DOCKERHUB_USERNAME }}/control-tower:${{ github.run_number }}

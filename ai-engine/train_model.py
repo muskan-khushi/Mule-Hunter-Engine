@@ -1,20 +1,25 @@
-import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv
 from torch_geometric.data import Data
 import os
+import pandas as pd
 import numpy as np
 
-# --- CONFIGURATION ---
-# Use the same relative path logic as the API so it works in Docker
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SHARED_DATA_DIR = os.path.join(BASE_DIR, "..", "shared-data")
+# --- CONFIGURATION FIX ---
+# os.getcwd() gets the directory where you ran the 'python' command.
+# If you are in the project root, this will correctly find /shared-data
+ROOT_DIR = os.getcwd() 
+SHARED_DATA_DIR = os.path.join(ROOT_DIR, "shared-data")
 
-NODES_PATH = os.path.join(SHARED_DATA_DIR, "nodes.csv")
-EDGES_PATH = os.path.join(SHARED_DATA_DIR, "transactions.csv")
-MODEL_SAVE_PATH = os.path.join(SHARED_DATA_DIR, "mule_model.pth")
-DATA_SAVE_PATH = os.path.join(SHARED_DATA_DIR, "processed_graph.pt")
+# Ensure the paths are absolute and clean
+NODES_PATH = os.path.normpath(os.path.join(SHARED_DATA_DIR, "nodes.csv"))
+EDGES_PATH = os.path.normpath(os.path.join(SHARED_DATA_DIR, "transactions.csv"))
+MODEL_SAVE_PATH = os.path.normpath(os.path.join(SHARED_DATA_DIR, "mule_model.pth"))
+DATA_LOAD_PATH = os.path.normpath(os.path.join(SHARED_DATA_DIR, "processed_graph.pt"))
+
+# Verify paths in console for debugging
+print(f"🔍 Training script looking for data in: {SHARED_DATA_DIR}")
 
 # --- DEFINING THE GNN (Must match inference_service.py exactly) ---
 class MuleSAGE(torch.nn.Module):
@@ -30,64 +35,45 @@ class MuleSAGE(torch.nn.Module):
         return F.log_softmax(x, dim=1)
 
 def train():
-    print("🚀 Starting Training Pipeline...")
+    print("🚀 Training AI on Kaggle IEEE-CIS Financial Network...")
 
-    # 1. Load Data
-    if not os.path.exists(NODES_PATH) or not os.path.exists(EDGES_PATH):
-        raise FileNotFoundError("❌ Data not found! Run POST /generate-data first.")
-
-    print("   Loading CSVs...")
-    df_nodes = pd.read_csv(NODES_PATH)
-    df_edges = pd.read_csv(EDGES_PATH)
-
-    # 2. Prepare Graph Data
-    # Align Node IDs (Map String IDs to Index 0..N)
-    # We need a mapping because PyTorch Geometric needs integer indices
-    node_mapping = {id: idx for idx, id in enumerate(df_nodes['node_id'].astype(str))}
+    # 1. Load the Engineered Graph Data
+    if not os.path.exists(DATA_LOAD_PATH):
+        raise FileNotFoundError(f"❌ Graph data not found at {DATA_LOAD_PATH}. Check your root directory!")
     
-    # Create Edge Index (Source -> Target)
-    src = df_edges['source'].astype(str).map(node_mapping).values
-    dst = df_edges['target'].astype(str).map(node_mapping).values
+    data = torch.load(DATA_LOAD_PATH, weights_only=False)
+
+    # 2. Handle Class Imbalance
+    fraud_count = int(data.y.sum())
+    safe_count = len(data.y) - fraud_count
     
-    # Filter out edges where nodes might be missing (safety check)
-    mask = ~np.isnan(src) & ~np.isnan(dst)
-    edge_index = torch.tensor([src[mask], dst[mask]], dtype=torch.long)
+    # Weights optimized for IEEE-CIS (1:15 ratio)
+    class_weights = torch.tensor([1.0, 15.0]).to(data.x.device)
 
-    # 3. Create Features (x)
-    feature_cols = ["account_age_days", "balance", "in_out_ratio", "pagerank", "tx_velocity"]
-    x = torch.tensor(df_nodes[feature_cols].values, dtype=torch.float)
+    # 3. Initialize Model with 32 hidden channels for Kaggle
+    model = MuleSAGE(in_channels=5, hidden_channels=32, out_channels=2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-4)
 
-    # 4. Create Labels (y)
-    y = torch.tensor(df_nodes['is_fraud'].values, dtype=torch.long)
-
-    # Pack it into a PyG Data Object
-    graph_data = Data(x=x, edge_index=edge_index, y=y)
-    
-    # SAVE THE GRAPH DATA (So inference can load it later)
-    torch.save(graph_data, DATA_SAVE_PATH)
-    print(f"Processed Graph saved to {DATA_SAVE_PATH}")
-
-    # 5. Initialize Model
-    # Input features = 5 (account_age, balance, ratio, pagerank, velocity)
-    model = MuleSAGE(in_channels=5, hidden_channels=16, out_channels=2)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
-
-    # 6. Training Loop
+    # 4. Training Loop
     model.train()
-    print("   Training GNN (This may take a moment)...")
-    for epoch in range(100): # 100 Epochs is enough for demo
+    print(f"   Nodes: {data.x.size(0)} | Edges: {data.edge_index.size(1)} | Fraud Cases: {fraud_count}")
+
+    for epoch in range(201):
         optimizer.zero_grad()
-        out = model(graph_data.x, graph_data.edge_index)
-        loss = F.nll_loss(out, graph_data.y)
+        out = model(data.x, data.edge_index)
+        loss = F.nll_loss(out, data.y, weight=class_weights)
         loss.backward()
         optimizer.step()
         
-        if epoch % 10 == 0:
-            print(f"   Epoch {epoch}: Loss {loss.item():.4f}")
+        if epoch % 20 == 0:
+            pred = out.argmax(dim=1)
+            correct = (pred == data.y).sum().item()
+            acc = correct / len(data.y)
+            print(f"   Epoch {epoch:3d} | Loss: {loss.item():.4f} | Train Acc: {acc:.2%}")
 
-    # 7. Save Model
+    # 5. Save Model Weights
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
-    print(f"🎉 Model saved to {MODEL_SAVE_PATH}")
+    print(f"🎉 SUCCESS! Kaggle-trained model saved to {MODEL_SAVE_PATH}")
 
 if __name__ == "__main__":
     train()

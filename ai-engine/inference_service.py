@@ -1,305 +1,196 @@
-"""
-Mule Hunter AI Service - Production Grade
-Entry point for Graph Neural Network (GNN) Inference.
-Features: Auto-Initialization, Dynamic Feature Engineering, and Real-time Risk Scoring.
-"""
-
 import os
-import random
 import logging
 import torch
 import torch.nn.functional as F
 import pandas as pd
-import numpy as np
-import networkx as nx
-from typing import List, Dict, Any
+from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
 from torch_geometric.nn import SAGEConv
 from torch_geometric.data import Data
+from threading import Lock
 
-# --- LOGGING CONFIGURATION ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+# =================================================
+# LOGGING
+# =================================================
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("MuleHunter-AI")
 
-# --- OPTIONAL DEPENDENCIES ---
-try:
-    from faker import Faker
-    fake = Faker('en_IN')
-except ImportError:
-    fake = None
-    logger.warning("Faker not found; random data will be used without localized names.")
+# =================================================
+# PATHS (Docker-safe)
+# =================================================
+SHARED_DATA = "/app/shared-data"
+MODEL_PATH = f"{SHARED_DATA}/mule_model.pth"
+GRAPH_PATH = f"{SHARED_DATA}/processed_graph.pt"
+NODES_PATH = f"{SHARED_DATA}/nodes.csv"  # OPTIONAL
 
-# --- CONFIGURATION & PATHS ---
-# Shared data directory for persistence across container restarts
-BASE_DIR = os.path.dirname(__file__)
-SHARED_DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "shared-data"))
-os.makedirs(SHARED_DATA_DIR, exist_ok=True)
-
-MODEL_PATH = os.path.join(SHARED_DATA_DIR, "mule_model.pth")
-DATA_PATH = os.path.join(SHARED_DATA_DIR, "processed_graph.pt")
-NODES_CSV_PATH = os.path.join(SHARED_DATA_DIR, "nodes.csv")
-EDGES_CSV_PATH = os.path.join(SHARED_DATA_DIR, "transactions.csv")
-
-# --- NEURAL NETWORK ARCHITECTURE ---
+# =================================================
+# MODEL
+# =================================================
 class MuleSAGE(torch.nn.Module):
-    """GraphSAGE implementation for inductive node classification."""
-    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int):
-        super(MuleSAGE, self).__init__()
+    def __init__(self, in_channels=5, hidden_channels=32, out_channels=2):
+        super().__init__()
         self.conv1 = SAGEConv(in_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, out_channels)
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, edge_index):
         x = self.conv1(x, edge_index)
         x = F.relu(x)
         x = self.conv2(x, edge_index)
         return F.log_softmax(x, dim=1)
 
-# --- DATA TRANSFER OBJECTS (DTOs) ---
+# =================================================
+# SCHEMAS
+# =================================================
 class TransactionRequest(BaseModel):
     source_id: int
     target_id: int
-    amount: float
+    amount: float = Field(gt=0)
     timestamp: str = "2025-12-25"
 
 class RiskResponse(BaseModel):
     node_id: int
     risk_score: float
     verdict: str
-    model_version: str
     out_degree: int
-    risk_ratio: float
-    population_size: str
-    ja3_detected: bool
     linked_accounts: List[str]
-    unsupervised_score: float
+    population_size: int
+    model_version: str
 
-# --- GLOBAL STATE ---
-model = None
-graph_data = None
-id_map = {} 
-reverse_id_map = {}
-node_features_df = None 
+# =================================================
+# GLOBAL STATE
+# =================================================
+model: Optional[MuleSAGE] = None
+base_graph: Optional[Data] = None
+node_df: Optional[pd.DataFrame] = None
+id_map, rev_map = {}, {}
 
-# --- INTERNAL LOGIC: BRAIN LOADING ---
-def load_assets_into_memory():
-    """Loads trained weights and graph data into RAM for inference."""
-    global model, graph_data, id_map, reverse_id_map, node_features_df
-    
-    if os.path.exists(MODEL_PATH) and os.path.exists(DATA_PATH):
-        try:
-            logger.info("⚙️ Loading Neural Network assets into memory...")
-            graph_data = torch.load(DATA_PATH, map_location='cpu', weights_only=False)
-            
-            node_features_df = pd.read_csv(NODES_CSV_PATH)
-            node_features_df['node_id'] = node_features_df['node_id'].astype(str)
-            
-            # Efficient O(1) Lookups
-            id_map = {row['node_id']: idx for idx, row in node_features_df.iterrows()}
-            reverse_id_map = {idx: row['node_id'] for idx, row in node_features_df.iterrows()}
-            
-            # Reconstruct Model Architecture
-            model = MuleSAGE(in_channels=5, hidden_channels=16, out_channels=2)
-            model.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
-            model.eval()
-            
-            logger.info(f"✅ SYSTEM READY: Scaled to {len(id_map)} entities.")
-        except Exception as e:
-            logger.error(f"❌ Failed to load AI brain: {str(e)}")
-    else:
-        logger.error("🚫 Missing model assets. System requires initialization.")
+_initialized = False
+_init_lock = Lock()
 
-# --- INTERNAL LOGIC: PIPELINE OPERATIONS ---
-def run_internal_generator():
-    """Simulates a synthetic financial network with injected mule rings."""
-    logger.info("📊 GENERATOR: Constructing synthetic financial network...")
-    NUM_USERS = 2000
-    G_base = nx.barabasi_albert_graph(n=NUM_USERS, m=2, seed=42)
-    G = nx.DiGraph() 
-    
-    for u, v in G_base.edges():
-        if random.random() > 0.5: G.add_edge(u, v)
-        else: G.add_edge(v, u)
+# =================================================
+# INIT LOGIC (BULLETPROOF)
+# =================================================
+def load_assets():
+    global model, base_graph, node_df, id_map, rev_map, _initialized
 
-    for i in G.nodes():
-        G.nodes[i]['is_fraud'] = 0
-        G.nodes[i]['account_age'] = random.randint(30, 3650)
+    if _initialized:
+        return
 
-    # Injection of Money Mule Patterns
-    for _ in range(50): 
-        mule = random.choice(list(G.nodes()))
-        criminal = random.choice(list(G.nodes()))
-        G.nodes[mule]['is_fraud'] = 1
-        G.nodes[criminal]['is_fraud'] = 1
-        G.add_edge(mule, criminal, amount=random.randint(50000, 100000))
-        for _ in range(random.randint(10, 20)):
-            victim = random.choice(list(G.nodes()))
-            if G.nodes[victim]['is_fraud'] == 0:
-                G.add_edge(victim, mule, amount=random.randint(500, 2000))
+    with _init_lock:
+        if _initialized:
+            return
 
-    pagerank_scores = nx.pagerank(G)
-    node_data = []
-    for n in G.nodes():
-        node_data.append({
-            "node_id": str(n),
-            "is_fraud": int(G.nodes[n]['is_fraud']),
-            "account_age_days": int(G.nodes[n]['account_age']),
-            "pagerank": float(pagerank_scores.get(n, 0)),
-            "balance": float(round(random.uniform(100.0, 50000.0), 2)),
-            "in_out_ratio": float(round(random.uniform(0.1, 2.0), 2)),
-            "tx_velocity": int(random.randint(0, 100))
-        })
-    
-    df_nodes = pd.DataFrame(node_data)
-    cols = ["node_id", "account_age_days", "balance", "in_out_ratio", "pagerank", "tx_velocity", "is_fraud"]
-    df_nodes[cols].to_csv(NODES_CSV_PATH, index=False)
-    
-    edge_data = [{"source": str(u), "target": str(v)} for u, v in G.edges()]
-    pd.DataFrame(edge_data).to_csv(EDGES_CSV_PATH, index=False)
-    logger.info("💾 Data generation persisted to shared-data.")
+        logger.info("🔄 Initializing MuleHunter AI...")
 
-def run_internal_trainer():
-    """Trains the GraphSAGE model on the generated topology."""
-    logger.info("🧠 TRAINER: Optimizing Neural Weights...")
-    df_nodes = pd.read_csv(NODES_CSV_PATH)
-    df_edges = pd.read_csv(EDGES_CSV_PATH)
+        if not os.path.exists(MODEL_PATH) or not os.path.exists(GRAPH_PATH):
+            logger.error("❌ Required assets missing")
+            return
 
-    node_mapping = {str(id): idx for idx, id in enumerate(df_nodes['node_id'].astype(str))}
-    src = df_edges['source'].astype(str).map(node_mapping).values
-    dst = df_edges['target'].astype(str).map(node_mapping).values
-    
-    mask = ~np.isnan(src) & ~np.isnan(dst)
-    edge_index = torch.tensor([src[mask], dst[mask]], dtype=torch.long)
+        base_graph = torch.load(GRAPH_PATH, map_location="cpu", weights_only=False)
 
-    feature_cols = ["account_age_days", "balance", "in_out_ratio", "pagerank", "tx_velocity"]
-    x = torch.tensor(df_nodes[feature_cols].values, dtype=torch.float)
-    y = torch.tensor(df_nodes['is_fraud'].values, dtype=torch.long)
+        if os.path.exists(NODES_PATH):
+            try:
+                node_df = pd.read_csv(NODES_PATH)
+                node_df["node_id"] = node_df["node_id"].astype(str)
+                id_map = {nid: i for i, nid in enumerate(node_df["node_id"])}
+                rev_map = {i: nid for nid, i in id_map.items()}
+                logger.info(f"ℹ️ nodes.csv loaded ({len(node_df)})")
+            except Exception as e:
+                logger.warning(f"nodes.csv ignored: {e}")
+                node_df = None
 
-    data = Data(x=x, edge_index=edge_index, y=y)
-    torch.save(data, DATA_PATH)
+        model = MuleSAGE()
+        model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+        model.eval()
 
-    local_model = MuleSAGE(in_channels=5, hidden_channels=16, out_channels=2)
-    optimizer = torch.optim.Adam(local_model.parameters(), lr=0.01)
-    
-    local_model.train()
-    for _ in range(100):
-        optimizer.zero_grad()
-        out = local_model(data.x, data.edge_index)
-        loss = F.nll_loss(out, data.y)
-        loss.backward()
-        optimizer.step()
+        _initialized = True
+        logger.info(f"✅ AI READY | Nodes={base_graph.num_nodes}")
 
-    torch.save(local_model.state_dict(), MODEL_PATH)
-    logger.info("🏆 Model training complete. State dictionary saved.")
-
-# --- LIFESPAN MANAGER (Auto-Init on Startup) ---
+# =================================================
+# FASTAPI APP
+# =================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Handles startup/shutdown events. 
-    Ensures the AI is ready for inference before accepting requests.
-    """
-    logger.info("🚀 AI Service Initialization Sequence Started...")
-    
-    if not os.path.exists(MODEL_PATH):
-        logger.warning("⚠️ No model detected. Running first-time setup...")
-        run_internal_generator()
-        run_internal_trainer()
-    else:
-        logger.info("📂 Persistence found. Skipping generator.")
-
-    load_assets_into_memory()
+    load_assets()
     yield
-    logger.info("🛑 AI Service shutting down safely.")
 
-# --- FASTAPI APP INITIALIZATION ---
-app = FastAPI(
-    title="Mule Hunter AI Service",
-    version="Gold-V1",
-    lifespan=lifespan
-)
+app = FastAPI(title="Mule Hunter AI", lifespan=lifespan)
 
-# --- API ENDPOINTS ---
+# =================================================
+# HEALTH ENDPOINT (THIS FIXES YOUR UI)
+# =================================================
+@app.get("/health")
+def health():
+    model_exists = os.path.exists(MODEL_PATH)
+    graph_exists = os.path.exists(GRAPH_PATH)
 
-@app.post("/initialize-system", tags=["System Maintenance"])
-async def trigger_full_reinit():
-    """Manually forces a full system re-initialization (Generator + Trainer)."""
-    run_internal_generator()
-    run_internal_trainer()
-    load_assets_into_memory()
-    return {"status": "SUCCESS", "message": "System re-initialized with new synthetic data."}
+    if model_exists and graph_exists and _initialized:
+        return {
+            "status": "HEALTHY",   # ✅ matches frontend
+            "model_loaded": True,
+            "nodes_count": base_graph.num_nodes if base_graph else 0,
+            "version": "Kaggle-V4-Final-Inductive"
+        }
 
-@app.post("/analyze-transaction", response_model=RiskResponse, tags=["Inference"])
-def analyze_transaction(tx: TransactionRequest):
-    """
-    Performs real-time risk assessment for a new transaction.
-    Injects dynamic features into the graph before inference.
-    """
-    global model, graph_data, id_map, node_features_df
-    
-    if model is None: 
-        raise HTTPException(status_code=503, detail="AI Model is not initialized yet.")
-    
-    # Node Resolution
-    str_id = str(tx.source_id)
-    src_idx = id_map.get(str_id)
-    tgt_idx = id_map.get(str(tx.target_id), 0)
+    return {
+        "status": "UNAVAILABLE",
+        "model_loaded": False,
+        "nodes_count": 0,
+        "version": "Unknown"
+    }
 
-    if src_idx is not None:
-        node_row = node_features_df.iloc[src_idx]
-        age = node_row['account_age_days']
-        balance = node_row['balance']
-        pagerank = node_row['pagerank']
-        
-        # Real-time feature shift based on incoming transaction
-        current_velocity = node_row['tx_velocity'] + 1
-        current_ratio = node_row['in_out_ratio'] 
-        if tx.amount > 10000: current_ratio += 0.5 
-        
-        features = torch.tensor([[age, balance, current_ratio, pagerank, current_velocity]], dtype=torch.float)
-        out_degree = (graph_data.edge_index[0] == src_idx).sum().item() + 1
-        risk_ratio_ui = current_ratio
+
+
+# =================================================
+# INFERENCE
+# =================================================
+@app.post("/analyze-transaction", response_model=RiskResponse)
+def analyze(tx: TransactionRequest):
+
+    if not _initialized:
+        load_assets()
+
+    x = base_graph.x.clone()
+    edge_index = base_graph.edge_index.clone()
+
+    src = str(tx.source_id)
+    tgt = str(tx.target_id)
+
+    if node_df is not None and src in id_map:
+        src_idx = id_map[src]
     else:
-        # Default for unknown nodes (Inductive handling)
-        features = torch.tensor([[30.0, 5000.0, 1.0, 0.0001, 1.0]], dtype=torch.float)
-        src_idx = 0 
-        out_degree = 1
-        risk_ratio_ui = 1.0
+        src_idx = x.size(0)
+        x = torch.cat([x, torch.zeros((1, x.size(1)))], dim=0)
 
-    # Inductive Edge Addition
-    new_edge = torch.tensor([[src_idx], [tgt_idx]], dtype=torch.long)
-    temp_edge_index = torch.cat([graph_data.edge_index, new_edge], dim=1)
+    if node_df is not None and tgt in id_map:
+        tgt_idx = id_map[tgt]
+    else:
+        tgt_idx = x.size(0)
+        x = torch.cat([x, torch.zeros((1, x.size(1)))], dim=0)
 
-    # GNN Inference
+    edge_index = torch.cat(
+        [edge_index, torch.tensor([[src_idx], [tgt_idx]])],
+        dim=1
+    )
+
     with torch.no_grad():
-        temp_x = graph_data.x.clone()
-        if src_idx is not None:
-            temp_x[src_idx] = features[0]
-            
-        out = model(temp_x, temp_edge_index)
-        fraud_risk = float(out[src_idx].exp()[1])
+        out = model(x, edge_index)
+        risk = float(out[src_idx].exp()[1])
 
-    # Verdict Generation
-    verdict = "SAFE"
-    if fraud_risk > 0.8: verdict = "CRITICAL (MULE)"
-    elif fraud_risk > 0.5: verdict = "SUSPICIOUS"
-    
-    neighbors = graph_data.edge_index[1][graph_data.edge_index[0] == src_idx]
-    linked = [f"Acct_{reverse_id_map.get(i.item(), '?')}" for i in neighbors[:3]]
+    verdict = (
+        "CRITICAL (MULE)" if risk > 0.85 else
+        "SUSPICIOUS" if risk > 0.6 else
+        "SAFE"
+    )
 
     return {
         "node_id": tx.source_id,
-        "risk_score": round(fraud_risk, 4),
+        "risk_score": round(risk, 4),
         "verdict": verdict,
-        "model_version": "MuleSAGE-5Feat",
-        "out_degree": out_degree,
-        "risk_ratio": round(risk_ratio_ui, 2),
-        "population_size": f"{len(id_map)} Nodes",
-        "ja3_detected": fraud_risk > 0.75,
-        "linked_accounts": linked,
-        "unsupervised_score": round(abs(fraud_risk - 0.1), 4)
+        "out_degree": int((edge_index[0] == src_idx).sum()),
+        "linked_accounts": [],
+        "population_size": x.size(0),
+        "model_version": "Kaggle-V4-Final-Inductive"
     }

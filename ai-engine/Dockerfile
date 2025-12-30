@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://dow
 COPY . .
 
 # 6. Expose the port the API runs on
-EXPOSE 8000
+EXPOSE 8001
 
 # 7. The command to run when the container starts
-CMD ["uvicorn", "inference_service:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "inference_service:app", "--host", "0.0.0.0", "--port", "8001"]
