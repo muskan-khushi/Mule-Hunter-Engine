@@ -2,10 +2,6 @@
 
 <div align="center">
 
-![Mule Hunter Banner](https://img.shields.io/badge/AI-Powered-lime?style=for-the-badge&logo=tensorflow)
-![Status](https://img.shields.io/badge/Status-Production--Ready-success?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
-
 ### **Defense in Depth: Real-Time Financial Fraud Detection Platform**
 
 *Stopping money mule networks before they cash out*
