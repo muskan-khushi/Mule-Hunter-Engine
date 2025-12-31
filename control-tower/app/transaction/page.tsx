@@ -213,11 +213,11 @@ const handleEvent = (event: MessageEvent) => {
 
 
 // 3️⃣ DO NOT CLOSE ON ERROR (critical)
-es.onerror = (e) => {
-  if (completedRef.current) return; // ✅ CORRECT GUARD
-  console.error("🔴 SSE ERROR", e);
-  setVaStatus("failed");
+es.onerror = () => {
+  // Browser fires this even on clean close — ignore completely
+  console.warn("🟡 SSE connection closed");
 };
+
 
 
 
