@@ -36,7 +36,7 @@ public class TransactionService {
 
             @Value("${ai.service.url:http://56.228.10.113:8001}") String aiServiceUrl,
             @Value("${visual.service.url:http://13.61.143.100:8000}") String visualServiceUrl,
-            @Value("${security.service.url:http://localhost:8080}") String securityServiceUrl
+            @Value("${security.service.url:http://mule-hunter-security-env.eba-twt3gcts.us-east-1.elasticbeanstalk.com}") String securityServiceUrl
     ) {
         this.repository = repository;
         this.nodeEnrichedService = nodeEnrichedService;
