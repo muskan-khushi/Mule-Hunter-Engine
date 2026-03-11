@@ -9,6 +9,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.mapping.FieldType;
+import org.springframework.data.mongodb.core.index.Indexed;
 
 @Document(collection = "newtransactions")
 public class Transaction {
@@ -16,6 +17,7 @@ public class Transaction {
     @Id
     private String id;
 
+    @Indexed(unique=true)
     private String transactionId;
 
     private String sourceAccount;
@@ -33,13 +35,13 @@ public class Transaction {
 
     // ================= GRAPH / AI =================
     private int outDegree;
-    private double riskRatio;
-    private String populationSize;
+    private Double riskRatio;
+    private Integer populationSize;
 
     private List<String> linkedAccounts = new ArrayList<>();
 
     private String unsupervisedModelName;
-    private double unsupervisedScore;
+    private Double unsupervisedScore;
 
     // ================= JA3 =================
     private Boolean ja3Detected;
@@ -103,11 +105,11 @@ public class Transaction {
     public int getOutDegree() { return outDegree; }
     public void setOutDegree(int outDegree) { this.outDegree = outDegree; }
 
-    public double getRiskRatio() { return riskRatio; }
-    public void setRiskRatio(double riskRatio) { this.riskRatio = riskRatio; }
+    public Double getRiskRatio() { return riskRatio; }
+    public void setRiskRatio(Double riskRatio) { this.riskRatio = riskRatio; }
 
-    public String getPopulationSize() { return populationSize; }
-    public void setPopulationSize(String populationSize) { this.populationSize = populationSize; }
+    public Integer getPopulationSize() { return populationSize; }
+    public void setPopulationSize(Integer populationSize) { this.populationSize = populationSize; }
 
     public List<String> getLinkedAccounts() { return linkedAccounts; }
     public void setLinkedAccounts(List<String> linkedAccounts) { this.linkedAccounts = linkedAccounts; }
@@ -117,7 +119,7 @@ public class Transaction {
         this.unsupervisedModelName = unsupervisedModelName;
     }
 
-    public double getUnsupervisedScore() { return unsupervisedScore; }
+    public Double getUnsupervisedScore() { return unsupervisedScore; }
     public void setUnsupervisedScore(double unsupervisedScore) {
         this.unsupervisedScore = unsupervisedScore;
     }

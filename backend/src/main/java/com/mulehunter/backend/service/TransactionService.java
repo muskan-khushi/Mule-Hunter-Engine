@@ -76,7 +76,9 @@ public class TransactionService {
 
                                                 savedTx.setOutDegree(result.getOutDegree());
                                                 savedTx.setRiskRatio(result.getRiskRatio());
-                                                savedTx.setPopulationSize(result.getPopulationSize());
+                                                if (result.getPopulationSize() != null) {
+                        savedTx.setPopulationSize(Integer.parseInt(result.getPopulationSize()));
+                    }
                                                 savedTx.setUnsupervisedModelName(result.getModelVersion());
                                                 savedTx.setUnsupervisedScore(result.getUnsupervisedScore());
                                                 savedTx.setLinkedAccounts(result.getLinkedAccounts());
@@ -126,14 +128,14 @@ public class TransactionService {
         double wBehavior = 0.20;
         double wSecurity = 0.15;
 
-        double gnnScore = tx.getRiskScore();
-        double eifScore = tx.getUnsupervisedScore();
+        double gnnScore = tx.getRiskScore() == null ? 0.0 : tx.getRiskScore();
+        double eifScore = tx.getUnsupervisedScore() == null ? 0.0 : tx.getUnsupervisedScore();
         double ja3Score = tx.getJa3Risk() == null ? 0.0 : tx.getJa3Risk();
 
         double behaviorScore = 0.0;
 
         if (tx.getOutDegree() > 20) behaviorScore += 0.4;
-        if (tx.getRiskRatio() > 0.9) behaviorScore += 0.3;
+        if (tx.getRiskRatio() != null && tx.getRiskRatio() > 0.9) behaviorScore += 0.3;
         if (tx.getLinkedAccounts() != null && tx.getLinkedAccounts().size() > 10)
             behaviorScore += 0.3;
 
