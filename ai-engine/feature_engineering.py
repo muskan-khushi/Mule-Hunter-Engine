@@ -86,7 +86,8 @@ def detect_rings(G: nx.DiGraph, max_ring_size: int = 8):
 def detect_communities(G: nx.DiGraph, fraud_labels: dict):
     """
     Identify fraud clusters using community detection.
-    Returns per-node community fraud rate (guilt-by-association).
+    Returns per-node community fraud rate AND actual community index integer.
+    FIX Gap 3: now stores real community_id (integer cluster index) not rate*100.
     """
     logger.info("🏘️  Detecting fraud communities...")
     G_undirected = G.to_undirected()
@@ -98,16 +99,18 @@ def detect_communities(G: nx.DiGraph, fraud_labels: dict):
         communities = list(nx.connected_components(G_undirected))
 
     community_fraud_rate = {}
+    community_id_map     = {}   # FIX Gap 3: real integer cluster ID per node
     for i, comm in enumerate(communities):
         fraud_in_community = sum(fraud_labels.get(n, 0) for n in comm)
         rate = fraud_in_community / len(comm) if comm else 0
         for node in comm:
             community_fraud_rate[node] = rate
+            community_id_map[node]     = i   # stable integer — unique per cluster
 
     high_risk_communities = sum(1 for c in communities
                                 if sum(fraud_labels.get(n, 0) for n in c) / len(c) > 0.3)
     logger.info(f"   📍 {len(communities)} communities | {high_risk_communities} high-risk clusters")
-    return community_fraud_rate
+    return community_fraud_rate, community_id_map
 
 
 # ─────────────────────────────────────────────
@@ -145,6 +148,12 @@ def compute_graph_metrics(G: nx.DiGraph, node_ids: list):
 # MAIN PIPELINE
 # ─────────────────────────────────────────────
 def build_graph_data():
+    # FIX Bug 6: set seeds so every run produces the identical split and results
+    import random
+    torch.manual_seed(42)
+    np.random.seed(42)
+    random.seed(42)
+
     logger.info("=" * 60)
     logger.info("🚀 MuleHunter Feature Engineering v2.0 — ELITE MODE")
     logger.info("=" * 60)
@@ -160,25 +169,30 @@ def build_graph_data():
     logger.info(f"   Loaded {len(df_nodes):,} nodes, {len(df_tx):,} edges")
 
     # 2. Build NetworkX graph
+    # FIX Bug 4: replaced iterrows() (100x slower) with nx.from_pandas_edgelist (vectorised)
     logger.info("🕸️  Building directed transaction graph...")
-    G = nx.DiGraph()
+    df_tx["amount"] = pd.to_numeric(df_tx["amount"], errors="coerce").fillna(1.0)
+    G = nx.from_pandas_edgelist(
+        df_tx, source="source", target="target",
+        edge_attr="amount", create_using=nx.DiGraph()
+    )
+    # Rename edge attribute 'amount' → 'weight' for consistency
+    nx.set_edge_attributes(
+        G,
+        {(u, v): d["amount"] for u, v, d in G.edges(data=True)},
+        "weight"
+    )
+    # Add any nodes that had no transactions
     G.add_nodes_from(df_nodes["node_id"])
-
-    for _, row in df_tx.iterrows():
-        src, tgt, amt = row["source"], row["target"], row.get("amount", 1)
-        if G.has_edge(src, tgt):
-            G[src][tgt]["weight"] += amt
-        else:
-            G.add_edge(src, tgt, weight=amt)
 
     logger.info(f"   Graph: {G.number_of_nodes():,} nodes | {G.number_of_edges():,} edges")
 
     # 3. Ring detection
     ring_count, ring_volume, rings_found = detect_rings(G)
 
-    # 4. Community detection
+    # 4. Community detection — returns fraud rate AND integer cluster IDs
     fraud_labels = dict(zip(df_nodes["node_id"], df_nodes["is_fraud"]))
-    community_fraud_rate = detect_communities(G, fraud_labels)
+    community_fraud_rate, community_id_map = detect_communities(G, fraud_labels)
 
     # 5. Graph metrics
     graph_metrics_df = compute_graph_metrics(G, df_nodes["node_id"].tolist())
@@ -188,6 +202,8 @@ def build_graph_data():
     df_nodes["ring_membership"]     = df_nodes["node_id"].map(ring_count).fillna(0)
     df_nodes["ring_volume"]         = df_nodes["node_id"].map(ring_volume).fillna(0)
     df_nodes["community_fraud_rate"]= df_nodes["node_id"].map(community_fraud_rate).fillna(0)
+    # FIX Gap 3: store real integer cluster ID (not rate*100)
+    df_nodes["community_id"]        = df_nodes["node_id"].map(community_id_map).fillna(0).astype(int)
 
     # 7. Fill any missing feature columns
     for col in FEATURE_COLS:
