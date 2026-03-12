@@ -127,7 +127,7 @@ public class TransactionService {
                                         ).subscribe();
 
                                         // ── Step 7: AI engine call ────────────
-                                        return aiRiskService.analyzeTransaction(sourceNodeId, targetNodeId, amount)
+                                        return aiRiskService.analyzeTransaction(sourceNodeId, targetNodeId, amount,behavior,graph,identity)
                                                 .defaultIfEmpty(new AiRiskResult())
                                                 .doOnNext(aiResult -> {
                                                     // Store GNN score so combineRiskSignals can read it
