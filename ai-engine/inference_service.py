@@ -159,7 +159,6 @@ class GnnScoreResponse(BaseModel):
     model: str
     version: str
     gnnScore: float
-    eifScore: float
     confidence: float
     fraudClusterId: int
     embeddingNorm: float
