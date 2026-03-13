@@ -156,12 +156,37 @@ class GnnScoreRequest(BaseModel):
     identityFeatures: IdentityFeatures = IdentityFeatures()
 
 class GnnScoreResponse(BaseModel):
-    model: str
-    version: str
-    gnnScore: float
-    confidence: float
-    fraudClusterId: int
-    embeddingNorm: float
+    """Full schema as defined in gnn_engineer_responsibilities_v2.pdf"""
+    model:     str
+    version:   str
+
+    # ── entity block ──────────────────────────────────────────
+    entity: Dict[str, Any]
+
+    # ── scores block ──────────────────────────────────────────
+    scores: Dict[str, Any]          # gnnScore, confidence, riskLevel
+
+    # ── fraud cluster ─────────────────────────────────────────
+    fraudCluster: Dict[str, Any]    # clusterId, clusterSize, clusterRiskScore
+
+    # ── network metrics ───────────────────────────────────────
+    networkMetrics: Dict[str, Any]  # suspiciousNeighbors, sharedDevices, sharedIPs,
+                                    # centralityScore, transactionLoops
+
+    # ── mule ring detection ───────────────────────────────────
+    muleRingDetection: Dict[str, Any]   # isMuleRingMember, ringId, ringShape,
+                                        # ringSize, role, hubAccount, ringAccounts
+
+    # ── risk factors, embedding, timestamp ───────────────────
+    riskFactors:  List[str]
+    embedding:    Dict[str, float]  # embeddingNorm
+    timestamp:    str
+
+    # ── kept for backward-compat with test_my_work.py checks ─
+    gnnScore:       float   # mirrors scores.gnnScore
+    confidence:     float   # mirrors scores.confidence
+    fraudClusterId: int     # mirrors fraudCluster.clusterId
+    embeddingNorm:  float   # mirrors embedding.embeddingNorm
 
 # ─────────────────────────────────────────────
 # GLOBAL STATE
@@ -578,70 +603,264 @@ def network_snapshot(limit: int = 200):
     }
 
 
+def _classify_ring_shape(ring_nodes: list, nx_g: nx.DiGraph) -> str:
+    """
+    Classify a detected ring into one of the four mule ring shapes.
+
+    STAR         — one hub with many spokes (high out-degree node)
+    CHAIN        — linear pass-through A→B→C→D
+    CYCLE        — every node has equal in/out degree (perfect loop)
+    DENSE_CLUSTER — high edge density within the sub-graph
+    """
+    if len(ring_nodes) < 3:
+        return "CYCLE"
+    sub = nx_g.subgraph(ring_nodes)
+    degrees    = [sub.out_degree(n) for n in ring_nodes]
+    max_deg    = max(degrees) if degrees else 0
+    avg_deg    = sum(degrees) / len(degrees) if degrees else 0
+    n          = len(ring_nodes)
+    max_edges  = n * (n - 1)
+    density    = sub.number_of_edges() / max_edges if max_edges else 0
+
+    if max_deg >= n * 0.6:
+        return "STAR"
+    if density >= 0.6:
+        return "DENSE_CLUSTER"
+    # Check for linearity: CHAIN has many nodes with degree=1 (endpoints)
+    deg_one = sum(1 for d in degrees if d <= 1)
+    if deg_one >= n * 0.4:
+        return "CHAIN"
+    return "CYCLE"
+
+
+def _classify_role(account_id: str, ring_nodes: list, nx_g: nx.DiGraph) -> tuple:
+    """
+    Determine an account's role in the ring and identify the hub account.
+
+    HUB    — highest out-degree (orchestrator, controls flow)
+    BRIDGE — connects two otherwise separate sub-clusters
+    MULE   — intermediate node that passes funds along
+    """
+    if not nx_g.has_node(account_id) or len(ring_nodes) < 2:
+        return "MULE", ring_nodes[0] if ring_nodes else account_id
+
+    sub        = nx_g.subgraph(ring_nodes)
+    out_degrees = {n: sub.out_degree(n) for n in ring_nodes}
+    hub_account = max(out_degrees, key=out_degrees.get)
+
+    # BRIDGE: betweenness centrality much higher than average
+    try:
+        bc      = nx.betweenness_centrality(sub)
+        avg_bc  = sum(bc.values()) / len(bc) if bc else 0
+        if bc.get(account_id, 0) > avg_bc * 2.0 and account_id != hub_account:
+            return "BRIDGE", hub_account
+    except Exception:
+        pass
+
+    if account_id == hub_account:
+        return "HUB", hub_account
+    return "MULE", hub_account
+
+
 @app.post("/v1/gnn/score", response_model=GnnScoreResponse)
 def gnn_score(request: GnnScoreRequest):
-
+    """
+    Full GNN scoring endpoint returning the complete schema defined in
+    gnn_engineer_responsibilities_v2.pdf — including mule ring detection,
+    cluster metrics, network metrics, and role classification.
+    """
     if not _initialized:
         load_assets()
-
     if model is None:
         raise HTTPException(503, "Model not loaded")
 
+    import datetime
     account_id = str(request.accountId)
 
-    # Resolve node index
+    # ── 1. Resolve node index ─────────────────────────────────────────────────
     if account_id in id_map:
         src_idx = id_map[account_id]
-        is_new = False
+        is_new  = False
     else:
         src_idx = base_graph.x.size(0)
-        is_new = True
+        is_new  = True
 
-    x = base_graph.x.clone()
+    x          = base_graph.x.clone()
     edge_index = base_graph.edge_index.clone()
-
-    # Inject neutral node for unknown accounts
     if is_new:
         x = torch.cat([x, torch.full((1, x.size(1)), 0.5)], dim=0)
 
-    # Run GNN inference
+    # ── 2. GNN inference ──────────────────────────────────────────────────────
     with torch.no_grad():
         logits, embeddings = model(x, edge_index, return_embedding=True)
+        probs       = logits[src_idx].exp()
+        raw_score   = float(probs[1])
+        confidence  = float(abs(probs[1] - probs[0]))
 
-        probs = logits[src_idx].exp()
-        raw_score = float(probs[1])
-        confidence = float(abs(probs[1] - probs[0]))
-
-    # Blend Spring Boot graph features with GNN score
-    neighbor_signal = min(1.0, request.graphFeatures.suspiciousNeighborCount / 10.0)
-    hop_density = max(0.0, min(1.0, request.graphFeatures.twoHopFraudDensity))
-
-    gnn_score_final = (
-        0.70 * raw_score
-        + 0.20 * hop_density
-        + 0.10 * neighbor_signal
-    )
-
-    gnn_score_final = round(min(1.0, max(0.0, gnn_score_final)), 6)
+    # Blend in Spring Boot graph features
+    neighbor_signal  = min(1.0, request.graphFeatures.suspiciousNeighborCount / 10.0)
+    hop_density      = max(0.0, min(1.0, request.graphFeatures.twoHopFraudDensity))
+    gnn_score_final  = round(min(1.0, max(0.0,
+        0.70 * raw_score + 0.20 * hop_density + 0.10 * neighbor_signal)), 6)
 
     # Embedding norm
     node_embedding = embeddings[src_idx]
     embedding_norm = round(float(torch.norm(node_embedding, p=2).item()), 6)
 
-    # Fraud cluster id
-    fraud_cluster_id = 0
-    if node_df is not None and not is_new and "community_id" in node_df.columns:
-        row = node_df[node_df["node_id"] == account_id]
-        if not row.empty:
-            fraud_cluster_id = int(row.iloc[0].get("community_id", 0))
+    # Risk level classification
+    threshold = float(model_meta.get("optimal_threshold", 0.5)) if model_meta else 0.5
+    if gnn_score_final >= min(0.95, threshold + 0.15):
+        risk_level = "HIGH"
+    elif gnn_score_final >= threshold:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    # ── 3. Pull node metadata from nodes.csv ─────────────────────────────────
+    node_row = None
+    if node_df is not None and not is_new:
+        rows = node_df[node_df["node_id"] == account_id]
+        if not rows.empty:
+            node_row = rows.iloc[0]
+
+    # ── 4. Fraud cluster block ────────────────────────────────────────────────
+    cluster_id         = 0
+    cluster_size       = 1
+    cluster_risk_score = round(gnn_score_final, 4)
+
+    if node_row is not None:
+        cluster_id = int(node_row.get("community_id", 0))
+        # clusterSize = count of nodes sharing the same community_id
+        if "community_id" in node_df.columns:
+            cluster_size = int((node_df["community_id"] == cluster_id).sum())
+        # clusterRiskScore = mean community_fraud_rate for that cluster
+        if "community_fraud_rate" in node_df.columns:
+            cluster_risk_score = round(
+                float(node_df[node_df["community_id"] == cluster_id]["community_fraud_rate"].mean()),
+                4
+            )
+
+    # ── 5. Network metrics block ──────────────────────────────────────────────
+    suspicious_neighbors = request.graphFeatures.suspiciousNeighborCount
+    shared_devices       = request.identityFeatures.deviceReuse
+    shared_ips           = request.identityFeatures.ipReuse
+    centrality_score     = 0.0
+    transaction_loops    = False
+
+    if node_row is not None:
+        centrality_score  = round(float(node_row.get("pagerank", 0.0)), 6)
+        transaction_loops = float(node_row.get("reciprocity_score", 0.0)) > 0.1
+
+    if nx_graph and account_id in nx_graph:
+        # Count neighbors flagged as fraud in nodes.csv
+        if node_df is not None and "is_fraud" in node_df.columns:
+            neighbors   = list(nx_graph.successors(account_id))
+            fraud_nodes = set(node_df[node_df["is_fraud"] == 1]["node_id"].astype(str))
+            suspicious_neighbors = max(
+                suspicious_neighbors,
+                sum(1 for n in neighbors if n in fraud_nodes)
+            )
+
+    # ── 6. Mule ring detection block ──────────────────────────────────────────
+    is_ring_member  = False
+    ring_id         = 0
+    ring_shape      = "STAR"
+    ring_size       = 1
+    role            = "MULE"
+    hub_account     = account_id
+    ring_accounts   = []
+
+    if node_row is not None and float(node_row.get("ring_membership", 0)) > 0:
+        is_ring_member = True
+
+    # Find this account in the pre-cached ring list
+    if is_ring_member or is_new is False:
+        for i, ring in enumerate(_rings_cache):
+            if account_id in ring.get("nodes", []):
+                is_ring_member  = True
+                ring_id         = i
+                ring_accounts   = ring["nodes"]
+                ring_size       = ring["size"]
+                # Classify shape and role using graph topology
+                if nx_graph:
+                    ring_shape  = _classify_ring_shape(ring_accounts, nx_graph)
+                    role, hub_account = _classify_role(account_id, ring_accounts, nx_graph)
+                break
+
+    # ── 7. Risk factors ───────────────────────────────────────────────────────
+    node_features = {}
+    if node_row is not None:
+        for col in FEATURE_COLS:
+            if col in node_row.index:
+                node_features[col] = float(node_row[col])
+    risk_factors = _build_risk_factors(node_features, gnn_score_final)
+
+    # Append ring/cluster-specific factors
+    if is_ring_member:
+        risk_factors.append(f"member_of_{ring_shape.lower()}_mule_ring")
+    if suspicious_neighbors > 3:
+        risk_factors.append("connected_to_high_risk_accounts")
+    if shared_devices > 1:
+        risk_factors.append("shared_device_with_multiple_accounts")
+    if transaction_loops:
+        risk_factors.append("rapid_pass_through_transactions")
+
+    # Deduplicate while preserving order
+    seen = set()
+    risk_factors = [f for f in risk_factors if not (f in seen or seen.add(f))]
 
     version = model_meta.get("version", "GNN-v1") if model_meta else "GNN-v1"
 
     return GnnScoreResponse(
-        model="GNN",
-        version=version,
-        gnnScore=gnn_score_final,
-        confidence=round(confidence, 6),
-        fraudClusterId=fraud_cluster_id,
-        embeddingNorm=embedding_norm
+        model   = "GNN",
+        version = version,
+
+        entity = {
+            "type": "ACCOUNT",
+            "id":   account_id,
+        },
+
+        scores = {
+            "gnnScore":  gnn_score_final,
+            "confidence": round(confidence, 6),
+            "riskLevel":  risk_level,
+        },
+
+        fraudCluster = {
+            "clusterId":        cluster_id,
+            "clusterSize":      cluster_size,
+            "clusterRiskScore": cluster_risk_score,
+        },
+
+        networkMetrics = {
+            "suspiciousNeighbors": suspicious_neighbors,
+            "sharedDevices":       shared_devices,
+            "sharedIPs":           shared_ips,
+            "centralityScore":     centrality_score,
+            "transactionLoops":    transaction_loops,
+        },
+
+        muleRingDetection = {
+            "isMuleRingMember": is_ring_member,
+            "ringId":           ring_id,
+            "ringShape":        ring_shape,
+            "ringSize":         ring_size,
+            "role":             role,
+            "hubAccount":       hub_account,
+            "ringAccounts":     ring_accounts,
+        },
+
+        riskFactors = risk_factors,
+
+        embedding = {
+            "embeddingNorm": embedding_norm,
+        },
+
+        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+
+        # ── backward-compat flat fields (test_my_work.py checks these) ──
+        gnnScore       = gnn_score_final,
+        confidence     = round(confidence, 6),
+        fraudClusterId = cluster_id,
+        embeddingNorm  = embedding_norm,
     )
