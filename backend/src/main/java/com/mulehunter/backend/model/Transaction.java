@@ -1,7 +1,6 @@
 package com.mulehunter.backend.model;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,24 +11,37 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.mapping.FieldType;
 import org.springframework.data.mongodb.core.index.Indexed;
 
-
-
 @Document(collection = "transactions")
 public class Transaction {
 
     @Id
     private String id;
 
-    @Indexed(unique = true)
+    // IMPORTANT: sparse = true so old transactions without a transactionId
+    // don't all collide on the unique null index and get silently dropped.
+    @Indexed(unique = true, sparse = true)
     private String transactionId;
 
+    // ── NEW format account fields (live API transactions) ─────────
     private String sourceAccount;
     private String targetAccount;
+
+    // ── OLD format account fields (graph dataset transactions) ────
+    // MongoDB stores these as "source" / "target" in old documents.
+    // @Field maps the exact MongoDB field name to avoid null reads.
+    @Field("source")
+    private String source;
+
+    @Field("target")
+    private String target;
 
     @Field(targetType = FieldType.DECIMAL128)
     private BigDecimal amount;
 
-    private Instant timestamp;
+    // Stored as plain ISO string in old docs ("2025-12-16T11:33:23.578092")
+    // and as $date object in new docs. Using String avoids deserialization errors.
+    private String timestamp;
+
     private String status;
     private String decision;   // APPROVE / REVIEW / BLOCK
 
@@ -106,16 +118,15 @@ public class Transaction {
 
     public static Transaction from(TransactionRequest request) {
         Transaction tx = new Transaction();
-        tx.transactionId = request.getTransactionId();
-        tx.sourceAccount = request.getSourceAccount();
-        tx.targetAccount = request.getTargetAccount();
-        tx.amount = request.getAmount() == null ? BigDecimal.ZERO : request.getAmount();
-        tx.timestamp = request.getTimestamp();
-        tx.status = "PENDING_RISK";
-        tx.decision = "PENDING";
+        tx.transactionId  = request.getTransactionId();
+        tx.sourceAccount  = request.getSourceAccount();
+        tx.targetAccount  = request.getTargetAccount();
+        tx.amount         = request.getAmount() == null ? BigDecimal.ZERO : request.getAmount();
+        tx.status         = "PENDING_RISK";
+        tx.decision       = "PENDING";
         tx.suspectedFraud = false;
-        tx.riskScore = 0.0;
-        tx.verdict = "PENDING";
+        tx.riskScore      = 0.0;
+        tx.verdict        = "PENDING";
         return tx;
     }
 
@@ -127,17 +138,25 @@ public class Transaction {
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String v) { this.transactionId = v; }
 
+    // NEW format
     public String getSourceAccount() { return sourceAccount; }
     public void setSourceAccount(String v) { this.sourceAccount = v; }
 
     public String getTargetAccount() { return targetAccount; }
     public void setTargetAccount(String v) { this.targetAccount = v; }
 
+    // OLD format fallback
+    public String getSource() { return source; }
+    public void setSource(String v) { this.source = v; }
+
+    public String getTarget() { return target; }
+    public void setTarget(String v) { this.target = v; }
+
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal v) { this.amount = v; }
 
-    public Instant getTimestamp() { return timestamp; }
-    public void setTimestamp(Instant v) { this.timestamp = v; }
+    public String getTimestamp() { return timestamp; }
+    public void setTimestamp(String v) { this.timestamp = v; }
 
     public String getStatus() { return status; }
     public void setStatus(String v) { this.status = v; }
@@ -284,17 +303,17 @@ public class Transaction {
     public void setEifTopFactors(Map<String, Double> v) { this.eifTopFactors = v; }
 
     public Map<String, Object> getModelScores() { return modelScores; }
-public void setModelScores(Map<String, Object> v) { this.modelScores = v; }
+    public void setModelScores(Map<String, Object> v) { this.modelScores = v; }
 
-public Map<String, Object> getNetworkMetrics() { return networkMetrics; }
-public void setNetworkMetrics(Map<String, Object> v) { this.networkMetrics = v; }
+    public Map<String, Object> getNetworkMetrics() { return networkMetrics; }
+    public void setNetworkMetrics(Map<String, Object> v) { this.networkMetrics = v; }
 
-public Map<String, Object> getFraudCluster() { return fraudCluster; }
-public void setFraudCluster(Map<String, Object> v) { this.fraudCluster = v; }
+    public Map<String, Object> getFraudCluster() { return fraudCluster; }
+    public void setFraudCluster(Map<String, Object> v) { this.fraudCluster = v; }
 
-public Map<String, Object> getMuleRingDetection() { return muleRingDetection; }
-public void setMuleRingDetection(Map<String, Object> v) { this.muleRingDetection = v; }
+    public Map<String, Object> getMuleRingDetection() { return muleRingDetection; }
+    public void setMuleRingDetection(Map<String, Object> v) { this.muleRingDetection = v; }
 
-public Map<String, Object> getJa3Security() { return ja3Security; }
-public void setJa3Security(Map<String, Object> v) { this.ja3Security = v; }
+    public Map<String, Object> getJa3Security() { return ja3Security; }
+    public void setJa3Security(Map<String, Object> v) { this.ja3Security = v; }
 }

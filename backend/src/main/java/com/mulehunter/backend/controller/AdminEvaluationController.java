@@ -19,12 +19,7 @@ public class AdminEvaluationController {
     }
 
     @GetMapping("/evaluate-models")
-    public Mono<MetricsResponse> evaluateModels(
-            @RequestParam(defaultValue = "7") int days
-    ) {
-        Instant end = Instant.now();
-        Instant start = end.minusSeconds(days * 24L * 3600);
-
-        return evaluationService.evaluateModels(start, end);
-    }
+public Mono<MetricsResponse> evaluate() {
+    return evaluationService.evaluateModels();
+}
 }

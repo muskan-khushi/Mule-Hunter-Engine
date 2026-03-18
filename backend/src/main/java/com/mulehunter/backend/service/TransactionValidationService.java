@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.Duration;
 
 @Service
@@ -35,11 +36,10 @@ public class TransactionValidationService {
         }
 
         // 3️⃣ Timestamp validation (24h window)
-        Instant ts = request.getTimestamp();
-        Instant now = Instant.now();
-        Instant cutoff = now.minus(Duration.ofHours(24));
+       LocalDateTime ts = request.getTimestamp();
+LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
 
-        if (ts.isBefore(cutoff)) {
+if (ts.isBefore(cutoff)) {
             return Mono.error(new IllegalArgumentException("Transaction timestamp too old"));
         }
 

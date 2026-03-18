@@ -2,6 +2,7 @@ package com.mulehunter.backend.model;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 
 public class TransactionRequest {
 
@@ -9,7 +10,7 @@ public class TransactionRequest {
     private String sourceAccount;
     private String targetAccount;
     private BigDecimal amount;
-    private Instant timestamp;
+     private LocalDateTime timestamp;
 
     public String getTransactionId() {
         return transactionId;
@@ -43,11 +44,11 @@ public class TransactionRequest {
         this.amount = amount;
     }
 
-    public Instant getTimestamp() {
-        return timestamp;
-    }
+    public LocalDateTime getTimestamp() {
+    return timestamp;
+}
 
-    public void setTimestamp(Instant timestamp) {
-        this.timestamp = timestamp;
-    }
+public void setTimestamp(LocalDateTime timestamp) {
+    this.timestamp = timestamp;
+}
 }

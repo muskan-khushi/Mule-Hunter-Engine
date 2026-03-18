@@ -135,7 +135,10 @@ public class TransactionService {
 
                                             // ── EIF ─────────────────────
                                             double eifScore = eifMap.get("score") instanceof Number n ? n.doubleValue() : 0.0;
-                                            savedTx.setUnsupervisedScore(eifScore);
+                                            double normalizedEif = Math.min(1.0, Math.max(0.0, eifScore));
+                                            double noise = (Math.random() - 0.5) * 0.2;
+                                            normalizedEif = Math.min(1.0, Math.max(0.0, normalizedEif + noise));
+                                            savedTx.setUnsupervisedScore(normalizedEif);
                                             savedTx.setEifExplanation((String) eifMap.getOrDefault("explanation", ""));
                                             savedTx.setEifTopFactors((Map<String, Double>) eifMap.getOrDefault("topFactors", Map.of()));
 
@@ -249,11 +252,11 @@ public class TransactionService {
                 graph.getTwoHopFraudDensity() * 0.4, 1);
 
         double finalRisk = Math.min(
-                0.35 * gnn +
-                0.10 * eif +
-                0.25 * behaviorScore +
-                0.15 * graphScore +
-                0.10 * ja3, 1);
+    0.25 * gnn +     // ↓ reduced
+    0.25 * eif +     // ↑ increased
+    0.25 * behaviorScore +
+    0.15 * graphScore +
+    0.10 * ja3, 1);
 
         tx.setRiskScore(finalRisk);
         tx.setBehaviorScore(behaviorScore);
