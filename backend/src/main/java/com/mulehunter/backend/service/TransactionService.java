@@ -6,6 +6,12 @@ import com.mulehunter.backend.model.AiRiskResult;
 import com.mulehunter.backend.model.Transaction;
 import com.mulehunter.backend.model.TransactionRequest;
 import com.mulehunter.backend.repository.TransactionRepository;
+
+import org.bson.Document;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -24,6 +30,7 @@ public class TransactionService {
     private final BehaviorFeatureService behaviorFeatureService;
     private final GraphFeatureService graphFeatureService;
     private final AggregateUpdateService aggregateUpdateService;
+    private final ReactiveMongoTemplate mongoTemplate;
 
     public TransactionService(
             TransactionRepository repository,
@@ -35,7 +42,8 @@ public class TransactionService {
             IdentityCollectorService identityCollectorService,
             BehaviorFeatureService behaviorFeatureService,
             GraphFeatureService graphFeatureService,
-            AggregateUpdateService aggregateUpdateService
+            AggregateUpdateService aggregateUpdateService,
+            ReactiveMongoTemplate mongoTemplate
     ) {
         this.repository = repository;
         this.nodeEnrichedService = nodeEnrichedService;
@@ -47,6 +55,7 @@ public class TransactionService {
         this.behaviorFeatureService = behaviorFeatureService;
         this.graphFeatureService = graphFeatureService;
         this.aggregateUpdateService = aggregateUpdateService;
+        this.mongoTemplate = mongoTemplate;
     }
 
     public Mono<Transaction> createTransaction(TransactionRequest request, String ja3) {
@@ -112,7 +121,7 @@ public class TransactionService {
                                                 behavior.getBurstScore(),
                                                 graph.getSuspiciousNeighborCount());
 
-                                        // Step 7 — AI + JA3 in parallel
+                                        // Step 7 — AI + JA3 + EIF in parallel
                                         return Mono.zip(
                                                 aiRiskService.analyzeTransaction(sourceNodeId, targetNodeId, amount)
                                                         .defaultIfEmpty(new AiRiskResult()),
@@ -126,125 +135,100 @@ public class TransactionService {
                                                         behavior.getUniqueCounterparties7d(),
                                                         behavior.getAvgAmountDeviation()
                                                 )
-                                        ).map(results -> {
+                                        ).flatMap(results -> {
+                                            AiRiskResult aiResult = results.getT1();
+                                            Map ja3Result = results.getT2();
+                                            Map<String, Object> eifResult = results.getT3();
 
+                                            double eifScore = eifResult.get("score") instanceof Number n ? n.doubleValue() : 0.0;
+                                            String eifExplanation = (String) eifResult.getOrDefault("explanation", "");
+                                            savedTx.setUnsupervisedScore(eifScore);
+                                            savedTx.setEifExplanation(eifExplanation);
+                                            savedTx.setEifTopFactors((Map<String, Double>) eifResult.getOrDefault("topFactors", Map.of()));
 
-                                                // 🔥 BUILD NESTED STRUCTURE BEFORE FINAL SAVE
+                                            // Store AI results
+                                            savedTx.setRiskScore(aiResult.getGnnScore());
+                                            savedTx.setVerdict(aiResult.getVerdict());
+                                            savedTx.setSuspectedFraud(aiResult.isSuspectedFraud());
+                                            savedTx.setUnsupervisedModelName(aiResult.getModelVersion());
+                                            savedTx.setLinkedAccounts(aiResult.getLinkedAccounts());
+                                            savedTx.setOutDegree(aiResult.getOutDegree());
+                                            savedTx.setRiskRatio(aiResult.getRiskRatio());
 
-                                        // ── MODEL SCORES ─────────────────────────
-                                        Map<String, Object> scores = new java.util.LinkedHashMap<>();
-                                        scores.put("gnn", savedTx.getGnnScore());
-                                        scores.put("eif", savedTx.getUnsupervisedScore());
-                                        scores.put("behavior", savedTx.getBehaviorScore());
-                                        scores.put("graph", savedTx.getGraphScore());
-                                        scores.put("ja3", savedTx.getJa3Risk());
-                                        scores.put("confidence", savedTx.getGnnConfidence());
-                                        scores.put("eifExplanation", savedTx.getEifExplanation());
-                                        scores.put("eifTopFactors", savedTx.getEifTopFactors());
+                                            // Store NEW rich GNN fields
+                                            savedTx.setGnnScore(aiResult.getGnnScore());
+                                            savedTx.setGnnConfidence(aiResult.getConfidence());
+                                            savedTx.setRiskLevel(aiResult.getRiskLevel());
+                                            savedTx.setSuspiciousNeighbors(aiResult.getSuspiciousNeighbors());
+                                            savedTx.setSharedDevices(aiResult.getSharedDevices());
+                                            savedTx.setSharedIPs(aiResult.getSharedIPs());
+                                            savedTx.setClusterId(aiResult.getClusterId());
+                                            savedTx.setClusterSize(aiResult.getClusterSize());
+                                            savedTx.setMuleRingMember(aiResult.isMuleRingMember());
+                                            savedTx.setRingShape(aiResult.getRingShape());
+                                            savedTx.setRingSize(aiResult.getRingSize());
+                                            savedTx.setRole(aiResult.getRole());
+                                            savedTx.setHubAccount(aiResult.getHubAccount());
+                                            savedTx.setRingAccounts(aiResult.getRingAccounts());
+                                            savedTx.setRiskFactors(aiResult.getRiskFactors());
+                                            savedTx.setEmbeddingNorm(aiResult.getEmbeddingNorm());
 
-                                        savedTx.setModelScores(scores);
-
-
-                                        // ── NETWORK ─────────────────────────────
-                                        Map<String, Object> network = new java.util.LinkedHashMap<>();
-                                        network.put("suspiciousNeighbors", savedTx.getSuspiciousNeighbors());
-                                        network.put("sharedDevices", savedTx.getSharedDevices());
-                                        network.put("sharedIPs", savedTx.getSharedIPs());
-                                        network.put("centralityScore", null);
-                                        network.put("transactionLoops", null);
-
-                                        savedTx.setNetworkMetrics(network);
-
-
-                                        // ── FRAUD CLUSTER ───────────────────────
-                                        Map<String, Object> cluster = new java.util.LinkedHashMap<>();
-                                        cluster.put("clusterId", savedTx.getClusterId());
-                                        cluster.put("clusterSize", savedTx.getClusterSize());
-                                        cluster.put("clusterRiskScore", null);
-
-                                        savedTx.setFraudCluster(cluster);
-
-
-                                        // ── MULE RING ───────────────────────────
-                                        Map<String, Object> ring = new java.util.LinkedHashMap<>();
-                                        ring.put("isMuleRingMember", savedTx.getMuleRingMember());
-                                        ring.put("ringShape", savedTx.getRingShape());
-                                        ring.put("ringSize", savedTx.getRingSize());
-                                        ring.put("role", savedTx.getRole());
-                                        ring.put("hubAccount", savedTx.getHubAccount());
-                                        ring.put("ringAccounts", savedTx.getRingAccounts());
-
-                                        savedTx.setMuleRingDetection(ring);
-
-
-                                        // ── JA3 SECURITY ───────────────────────
-                                        Map<String, Object> ja3_Map = new java.util.LinkedHashMap<>();
-                                        ja3_Map.put("ja3Risk", savedTx.getJa3Risk());
-                                        ja3_Map.put("ja3Detected", savedTx.getJa3Detected());
-                                        ja3_Map.put("velocity", savedTx.getJa3Velocity());
-                                        ja3_Map.put("fanout", savedTx.getJa3Fanout());
-                                        ja3_Map.put("isNewDevice", savedTx.getIsNewDevice());
-                                        ja3_Map.put("isNewJa3", savedTx.getIsNewJa3());
-
-                                        savedTx.setJa3Security(ja3_Map);
-                                        AiRiskResult aiResult = results.getT1();
-                                        // Map ja3Result = results.getT2();
-                                        // Map<String, Object> eifResult = results.getT3();
-                                        // double eifScore = eifResult.get("score") instanceof Number n ? n.doubleValue() : 0.0;
-                                        // String eifExplanation = (String) eifResult.getOrDefault("explanation", "");
-                                        // savedTx.setUnsupervisedScore(eifScore);
-                                        // savedTx.setEifExplanation(eifExplanation);
-                                        // savedTx.setEifTopFactors((Map<String, Double>) eifResult.getOrDefault("topFactors", Map.of()));
-
-                                        //     // Store AI results
-                                        //     savedTx.setRiskScore(aiResult.getGnnScore());
-                                        //     savedTx.setVerdict(aiResult.getVerdict());
-                                        //     savedTx.setSuspectedFraud(aiResult.isSuspectedFraud());
-                                        //     savedTx.setUnsupervisedModelName(aiResult.getModelVersion());
-                                        //     // EIF score set from real EIF service above
-                                        //     savedTx.setLinkedAccounts(aiResult.getLinkedAccounts());
-                                        //     savedTx.setOutDegree(aiResult.getOutDegree());
-                                        //     savedTx.setRiskRatio(aiResult.getRiskRatio());
-
-                                        //     // Store NEW rich GNN fields on transaction
-                                        //     savedTx.setGnnScore(aiResult.getGnnScore());
-                                        //     savedTx.setGnnConfidence(aiResult.getConfidence());
-                                        //     savedTx.setRiskLevel(aiResult.getRiskLevel());
-                                        //     savedTx.setSuspiciousNeighbors(aiResult.getSuspiciousNeighbors());
-                                        //     savedTx.setSharedDevices(aiResult.getSharedDevices());
-                                        //     savedTx.setSharedIPs(aiResult.getSharedIPs());
-                                        //     savedTx.setClusterId(aiResult.getClusterId());
-                                        //     savedTx.setClusterSize(aiResult.getClusterSize());
-                                        //     savedTx.setMuleRingMember(aiResult.isMuleRingMember());
-                                        //     savedTx.setRingShape(aiResult.getRingShape());
-                                        //     savedTx.setRingSize(aiResult.getRingSize());
-                                        //     savedTx.setRole(aiResult.getRole());
-                                        //     savedTx.setHubAccount(aiResult.getHubAccount());
-                                        //     savedTx.setRingAccounts(aiResult.getRingAccounts());
-                                        //     savedTx.setRiskFactors(aiResult.getRiskFactors());
-                                        //     savedTx.setEmbeddingNorm(aiResult.getEmbeddingNorm());
-
-                                        //     // Store JA3 results
-                                        //     Object riskObj     = ja3Result.get("ja3Risk");
-                                        //     Object velocityObj = ja3Result.get("velocity");
-                                        //     Object fanoutObj   = ja3Result.get("fanout");
-                                        //     if (riskObj instanceof Number n) {
-                                        //         savedTx.setJa3Risk(n.doubleValue());
-                                        //         savedTx.setJa3Detected(n.doubleValue() > 0.7);
-                                        //     }
-                                        //     if (velocityObj instanceof Number n) savedTx.setJa3Velocity(n.intValue());
-                                        //     if (fanoutObj   instanceof Number n) savedTx.setJa3Fanout(n.intValue());
+                                            // Store JA3 results
+                                            Object riskObj     = ja3Result.get("ja3Risk");
+                                            Object velocityObj = ja3Result.get("velocity");
+                                            Object fanoutObj   = ja3Result.get("fanout");
+                                            if (riskObj instanceof Number n) {
+                                                savedTx.setJa3Risk(n.doubleValue());
+                                                savedTx.setJa3Detected(n.doubleValue() > 0.7);
+                                            }
+                                            if (velocityObj instanceof Number n) savedTx.setJa3Velocity(n.intValue());
+                                            if (fanoutObj   instanceof Number n) savedTx.setJa3Fanout(n.intValue());
 
                                             // Combine all signals
                                             combineRiskSignals(savedTx, behavior, graph, aiResult);
 
-                                            return savedTx;
+                                            // Save final transaction
+                                            return repository.save(savedTx)
+                                                    .flatMap(saved -> writeToGraph(saved).thenReturn(saved));
                                         });
                                     })
-                            )
-
-                            .flatMap(repository::save);
+                            );
                 }));
+    }
+
+    // ── Write edge + upsert nodes into graph collections ─────────────────────
+    private Mono<Void> writeToGraph(Transaction saved) {
+        // Graph edge
+        Document edge = new Document()
+                .append("source", saved.getSourceAccount())
+                .append("target", saved.getTargetAccount())
+                .append("amount", saved.getAmount());
+
+        // Source node upsert
+        Query sourceQuery = new Query(Criteria.where("node_id").is(saved.getSourceAccount()));
+        Update sourceUpdate = new Update()
+                .set("anomaly_score", saved.getRiskScore() == null ? 0.0 : saved.getRiskScore())
+                .set("is_anomalous",  saved.isSuspectedFraud() ? "1" : "0")
+                .set("tx_velocity",   saved.getJa3Velocity() == null ? 1 : saved.getJa3Velocity())
+                .setOnInsert("node_id", saved.getSourceAccount());
+
+        // Target node upsert
+        Query targetQuery = new Query(Criteria.where("node_id").is(saved.getTargetAccount()));
+        Update targetUpdate = new Update()
+                .setOnInsert("node_id",      saved.getTargetAccount())
+                .setOnInsert("anomaly_score", 0.0)
+                .setOnInsert("is_anomalous",  "0")
+                .setOnInsert("tx_velocity",   1L);
+
+        return Mono.when(
+                mongoTemplate.insert(edge, "graph_edges").then(),
+                mongoTemplate.upsert(sourceQuery, sourceUpdate, "nodes").then(),
+                mongoTemplate.upsert(targetQuery, targetUpdate, "nodes").then()
+        ).doOnSuccess(v -> System.out.println("📊 GRAPH UPDATED: " + saved.getSourceAccount() + " → " + saved.getTargetAccount()))
+         .onErrorResume(e -> {
+             System.err.println("⚠️ Graph write failed: " + e.getMessage());
+             return Mono.empty();
+         });
     }
 
     private void combineRiskSignals(Transaction tx,
@@ -266,14 +250,12 @@ public class TransactionService {
                 graph.getConnectivityScore() * 0.6 + graph.getTwoHopFraudDensity() * 0.4,
                 1.0);
 
-        // JA3 combined signal
         int ja3Velocity = tx.getJa3Velocity() == null ? 0 : tx.getJa3Velocity();
         int ja3Fanout   = tx.getJa3Fanout()   == null ? 0 : tx.getJa3Fanout();
         double ja3VBoost = ja3Velocity > 50 ? 0.2 : ja3Velocity > 20 ? 0.1 : 0.0;
         double ja3FBoost = ja3Fanout   > 20 ? 0.2 : ja3Fanout   > 10 ? 0.1 : 0.0;
         double ja3Combined = Math.min(ja3Score + ja3VBoost + ja3FBoost, 1.0);
 
-        // Mule ring boost — if GNN detects ring membership, increase risk
         double ringBoost = aiResult.isMuleRingMember() ? 0.15 : 0.0;
 
         double raw = 0.35 * gnnScore
@@ -297,7 +279,6 @@ public class TransactionService {
         tx.setBurstScore(burst);
         tx.setSuspectedFraud(finalRisk >= 0.45);
 
-        // Decision
         String decision;
         if (finalRisk >= 0.75)      decision = "BLOCK";
         else if (finalRisk >= 0.45) decision = "REVIEW";
