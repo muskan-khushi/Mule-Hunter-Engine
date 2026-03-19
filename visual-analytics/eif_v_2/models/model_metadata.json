@@ -1,9 +1,10 @@
 {
   "model": "EIF",
-  "version": "v4",
+  "version": "v5",
   "raw_feature_dim": 6,
   "expanded_feature_dim": 12,
-  "threshold": 0.577088441130882,
+  "threshold": 0.3373278331763149,
+  "threshold_direction": "lte",
   "raw_features": [
     "velocity_score",
     "burst_score",
