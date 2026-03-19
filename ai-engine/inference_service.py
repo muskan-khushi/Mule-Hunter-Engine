@@ -465,17 +465,26 @@ def _infer_new_node(
     """
     Score a node that was not present during training.
 
-    The new node is appended to the feature matrix with neutral (0.5)
-    features but NO edges are added — the existing edge_index only covers
-    the training graph. This means the new node receives no message-passing
-    signal and is scored purely by the MLP head.  That produces a
-    conservatively neutral score (~0.3–0.5), which is the safest default
-    for an unknown account: don't flag it, don't clear it.
+    Step 1 — MLP-only baseline:
+        The new node is appended to the feature matrix with neutral (0.5)
+        features and NO edges into the training graph.  The GNN conv layers
+        therefore contribute zero message-passing signal; only the MLP head
+        (via the residual skip connection) produces a score.  This gives a
+        conservatively neutral baseline (~0.35–0.45).
 
-    A proper k-hop subgraph inference would require knowing the new node's
-    real neighbours at request time, which the REST contract doesn't supply.
-    Spring Boot can compensate via the graphFeatures blend in /v1/gnn/score.
+    Step 2 — Neighbourhood blend (Bug #4 fix):
+        If the account_id already exists as a node in nx_graph (i.e. it has
+        appeared in past transactions but was not in the training snapshot),
+        we pull the cached risk scores of its known neighbours from
+        _logit_cache and blend them in.  This propagates guilt-by-association
+        from confirmed fraudsters to their new transaction partners without
+        needing a full graph retrain.
+
+        Weights: 60% own MLP score + 30% mean neighbour risk + 10% max
+        neighbour risk.  The max term catches the case where one very high-
+        risk neighbour should elevate an otherwise neutral account.
     """
+    # ── Step 1: MLP-only forward pass ─────────────────────────────────────
     x          = base_graph.x.clone()
     edge_index = base_graph.edge_index.clone()
 
@@ -485,12 +494,35 @@ def _infer_new_node(
 
     with torch.no_grad():
         logits, embeddings = model(x, edge_index, return_embedding=True)
-        probs  = logits[new_idx].exp()
-        risk   = float(probs[1])
-        conf   = float(abs(probs[1] - probs[0]))
-        embnm  = float(torch.norm(embeddings[new_idx], p=2).item())
+        probs    = logits[new_idx].exp()
+        mlp_risk = float(probs[1])
+        conf     = float(abs(probs[1] - probs[0]))
+        embnm    = float(torch.norm(embeddings[new_idx], p=2).item())
 
-    return risk, conf, embnm
+    # ── Step 2: Neighbourhood blend via nx_graph + _logit_cache ───────────
+    # Both nx_graph and _logit_cache are populated at startup and read-only
+    # here, so there are no thread-safety concerns.
+    if nx_graph is not None and nx_graph.has_node(account_id):
+        neighbour_scores: list[float] = []
+        for nb in (list(nx_graph.predecessors(account_id)) +
+                   list(nx_graph.successors(account_id))):
+            if nb in _logit_cache:
+                neighbour_scores.append(_logit_cache[nb][0])  # index 0 = risk
+
+        if neighbour_scores:
+            nb_mean = float(np.mean(neighbour_scores))
+            nb_max  = float(np.max(neighbour_scores))
+            # Blend: own score weighted highest, mean and max of neighbours secondary
+            mlp_risk = float(np.clip(
+                0.60 * mlp_risk + 0.30 * nb_mean + 0.10 * nb_max,
+                0.0, 1.0,
+            ))
+            logger.debug(
+                "_infer_new_node %s: mlp=%.4f nb_mean=%.4f nb_max=%.4f → blended=%.4f",
+                account_id, float(probs[1]), nb_mean, nb_max, mlp_risk,
+            )
+
+    return mlp_risk, conf, embnm
 
 
 def _get_node_features(account_id: str) -> dict:

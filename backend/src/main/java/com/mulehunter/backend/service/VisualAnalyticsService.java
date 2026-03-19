@@ -18,7 +18,7 @@ public class VisualAnalyticsService {
     private String visualInternalApiKey;
 
     public VisualAnalyticsService(
-            @Value("${visual.service.url:http://13.61.143.100:8000}") String visualServiceUrl
+            @Value("${visual.analytics.url:http://13.61.143.100:8000}") String visualServiceUrl
     ) {
 
         System.out.println("🔌 CONNECTING VISUALS TO: " + visualServiceUrl);
@@ -30,12 +30,24 @@ public class VisualAnalyticsService {
 
     public Mono<Void> triggerVisualMlPipeline(Transaction tx) {
 
+        // Guard: both account IDs must be non-null numeric strings.
+        // Long.parseLong throws NumberFormatException silently swallowed by
+        // onErrorResume if we let it propagate — catch it explicitly here.
+        long srcId, tgtId;
+        try {
+            srcId = Long.parseLong(tx.getSourceAccount());
+            tgtId = Long.parseLong(tx.getTargetAccount());
+        } catch (NumberFormatException | NullPointerException e) {
+            System.err.println("⚠️ VISUAL trigger skipped — non-numeric account ID: " + e.getMessage());
+            return Mono.empty();
+        }
+
         Map<String, Object> payload = Map.of(
                 "trigger", "TRANSACTION_EVENT",
                 "transactionId", tx.getId(),
                 "nodes", List.of(
-                        Map.of("nodeId", Long.parseLong(tx.getSourceAccount()), "role", "SOURCE"),
-                        Map.of("nodeId", Long.parseLong(tx.getTargetAccount()), "role", "TARGET")
+                        Map.of("nodeId", srcId, "role", "SOURCE"),
+                        Map.of("nodeId", tgtId, "role", "TARGET")
                 )
         );
 

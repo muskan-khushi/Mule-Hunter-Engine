@@ -17,18 +17,12 @@ public class Transaction {
     @Id
     private String id;
 
-    // IMPORTANT: sparse = true so old transactions without a transactionId
-    // don't all collide on the unique null index and get silently dropped.
     @Indexed(unique = true, sparse = true)
     private String transactionId;
 
-    // ── NEW format account fields (live API transactions) ─────────
     private String sourceAccount;
     private String targetAccount;
 
-    // ── OLD format account fields (graph dataset transactions) ────
-    // MongoDB stores these as "source" / "target" in old documents.
-    // @Field maps the exact MongoDB field name to avoid null reads.
     @Field("source")
     private String source;
 
@@ -38,18 +32,14 @@ public class Transaction {
     @Field(targetType = FieldType.DECIMAL128)
     private BigDecimal amount;
 
-    // Stored as plain ISO string in old docs ("2025-12-16T11:33:23.578092")
-    // and as $date object in new docs. Using String avoids deserialization errors.
     private String timestamp;
-
     private String status;
-    private String decision;   // APPROVE / REVIEW / BLOCK
+    private String decision;
 
     private boolean suspectedFraud;
     private Double riskScore;
     private String verdict;
 
-    // ── OLD graph/AI fields (kept) ────────────────────────────────
     private int outDegree;
     private Double riskRatio;
     private Integer populationSize;
@@ -57,24 +47,20 @@ public class Transaction {
     private String unsupervisedModelName;
     private Double unsupervisedScore;
 
-    // ── NEW GNN rich fields ───────────────────────────────────────
     private Double gnnScore;
     private Double gnnConfidence;
     private String riskLevel;
 
-    // network metrics
     private Integer suspiciousNeighbors;
     private Integer sharedDevices;
     private Integer sharedIPs;
     private Double centralityScore;
     private Boolean transactionLoops;
 
-    // fraud cluster
     private Integer clusterId;
     private Integer clusterSize;
     private Double clusterRiskScore;
 
-    // mule ring
     private Boolean muleRingMember;
     private Integer ringId;
     private String ringShape;
@@ -83,19 +69,18 @@ public class Transaction {
     private String hubAccount;
     private List<String> ringAccounts = new ArrayList<>();
 
-    // risk factors & embedding
     private List<String> riskFactors = new ArrayList<>();
     private Double embeddingNorm;
     private String eifExplanation;
+    // ── ADDED: EIF model confidence (distinct from GNN confidence) ────────────
+    private Double eifConfidence;
     private Map<String, Double> eifTopFactors = new java.util.LinkedHashMap<>();
 
-    // ── Risk combine component scores ─────────────────────────────
     private Double behaviorScore;
     private Double graphScore;
     private Double velocityScore;
     private Double burstScore;
 
-    // ── JA3 fields ────────────────────────────────────────────────
     private Boolean ja3Detected;
     private Double ja3Risk;
     private Integer ja3Velocity;
@@ -130,22 +115,18 @@ public class Transaction {
         return tx;
     }
 
-    // ── Getters / Setters ─────────────────────────────────────────
-
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String v) { this.transactionId = v; }
 
-    // NEW format
     public String getSourceAccount() { return sourceAccount; }
     public void setSourceAccount(String v) { this.sourceAccount = v; }
 
     public String getTargetAccount() { return targetAccount; }
     public void setTargetAccount(String v) { this.targetAccount = v; }
 
-    // OLD format fallback
     public String getSource() { return source; }
     public void setSource(String v) { this.source = v; }
 
@@ -251,6 +232,15 @@ public class Transaction {
     public Double getEmbeddingNorm() { return embeddingNorm; }
     public void setEmbeddingNorm(Double v) { this.embeddingNorm = v; }
 
+    public String getEifExplanation() { return eifExplanation; }
+    public void setEifExplanation(String v) { this.eifExplanation = v; }
+
+    public Double getEifConfidence() { return eifConfidence; }
+    public void setEifConfidence(Double v) { this.eifConfidence = v; }
+
+    public Map<String, Double> getEifTopFactors() { return eifTopFactors; }
+    public void setEifTopFactors(Map<String, Double> v) { this.eifTopFactors = v; }
+
     public Double getBehaviorScore() { return behaviorScore; }
     public void setBehaviorScore(Double v) { this.behaviorScore = v; }
 
@@ -295,12 +285,6 @@ public class Transaction {
 
     public Boolean getIsNewJa3() { return isNewJa3; }
     public void setIsNewJa3(Boolean v) { this.isNewJa3 = v; }
-
-    public String getEifExplanation() { return eifExplanation; }
-    public void setEifExplanation(String v) { this.eifExplanation = v; }
-
-    public Map<String, Double> getEifTopFactors() { return eifTopFactors; }
-    public void setEifTopFactors(Map<String, Double> v) { this.eifTopFactors = v; }
 
     public Map<String, Object> getModelScores() { return modelScores; }
     public void setModelScores(Map<String, Object> v) { this.modelScores = v; }

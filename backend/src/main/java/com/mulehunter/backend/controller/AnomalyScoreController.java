@@ -20,7 +20,7 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/api") 
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true") 
+@CrossOrigin(origins = "*") 
 public class AnomalyScoreController {
 
     private final AnomalyScoreService service;

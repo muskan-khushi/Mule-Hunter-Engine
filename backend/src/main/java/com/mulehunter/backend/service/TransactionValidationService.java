@@ -7,6 +7,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.Duration;
 
 @Service
@@ -36,10 +37,10 @@ public class TransactionValidationService {
         }
 
         // 3️⃣ Timestamp validation (24h window)
-       LocalDateTime ts = request.getTimestamp();
-LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+        LocalDateTime ts = request.getTimestamp();
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusHours(24);
 
-if (ts.isBefore(cutoff)) {
+        if (ts.isBefore(cutoff)) {
             return Mono.error(new IllegalArgumentException("Transaction timestamp too old"));
         }
 

@@ -51,7 +51,7 @@ public class GraphController {
                                         boolean isAnomalous = "1"
                                                         .equals(doc.getOrDefault("is_anomalous", "0").toString());
 
-                                        long txVelocity = parseLong(doc.get("tx_velocity"));
+                                        long txVelocity = parseLong(doc.get("tx_count")); // nodes.csv uses tx_count, not tx_velocity
 
                                         return new GraphNodeDTO(
                                                         nodeId,
@@ -61,7 +61,8 @@ public class GraphController {
                                 })
                                 .filter(n -> n != null)
                                 .collectList()
-                                .onErrorReturn(List.of());
+                                .onErrorReturn(List.of())
+                                .cache(); // prevents double DB hit when zipWith + Mono.zip both subscribe
 
                 // ---------- LINKS ----------
                 Mono<List<GraphLinkDTO>> linksMono = mongo.findAll(Map.class, "transactions")

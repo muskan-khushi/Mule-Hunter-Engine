@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,27 +17,30 @@ import java.util.Map;
 public class AiRiskService {
 
     private final WebClient aiWebClient;
-    private final WebClient eifWebClient;
+    private final EifService eifService;
 
     public AiRiskService(
-        @Value("${ai.service.url:http://56.228.10.113:8001}") String aiServiceUrl,
-        @Value("${visual.service.url:http://16.170.208.158:8000}") String visualServiceUrl
-) {
-    System.out.println("🔌 CONNECTING AI TO: " + aiServiceUrl);
-    this.aiWebClient = WebClient.builder().baseUrl(aiServiceUrl).build();
-    System.out.println("🔬 CONNECTING EIF TO: " + visualServiceUrl);
-    this.eifWebClient = WebClient.builder().baseUrl(visualServiceUrl).build();
-}
+            @Value("${ai.service.url:http://56.228.10.113:8001}") String aiServiceUrl,
+            EifService eifService
+    ) {
+        System.out.println("🔌 CONNECTING AI TO: " + aiServiceUrl);
+        this.aiWebClient = WebClient.builder().baseUrl(aiServiceUrl).build();
+        this.eifService  = eifService;
+    }
 
-    public Mono<AiRiskResult> analyzeTransaction(Long source, Long target, double amount) {
+    public Mono<AiRiskResult> analyzeTransaction(
+            Long source, Long target, double amount,
+            int suspiciousNeighborCount,
+            double twoHopFraudDensity,
+            double connectivityScore) {
 
         Map<String, Object> graphFeatures = Map.of(
-        "suspiciousNeighborCount", 0,
-        "twoHopFraudDensity", 0.0,
-        "connectivityScore", 0.0
+                "suspiciousNeighborCount", suspiciousNeighborCount,
+                "twoHopFraudDensity",      twoHopFraudDensity,
+                "connectivityScore",        connectivityScore
         );
         Map<String, Object> payload = Map.of(
-                "accountId", String.valueOf(source),
+                "accountId",     String.valueOf(source),
                 "graphFeatures", graphFeatures
         );
 
@@ -161,46 +163,29 @@ public class AiRiskService {
         return result;
     }
 
-    public Mono<Map<String, Object>> scoreEif(double totalIn24h, double totalOut24h,
-                              double velocityScore, double burstScore,
-                              double uniqueCounterparties7d, double avgAmountDeviation) {
-    Map<String, Object> payload = Map.of(
-            "features", java.util.List.of(
-                    totalIn24h, totalOut24h,
-                    velocityScore, burstScore,
-                    uniqueCounterparties7d, avgAmountDeviation
-            )
-    );
-    return eifWebClient.post()
-            .uri("/v1/eif/score")
-            .bodyValue(payload)
-            .retrieve()
-            .bodyToMono(JsonNode.class)
-            .map(r -> {
-                double score = r.path("score").asDouble(0.0);
-                String explanation = r.path("explanation").asText("");
+    /**
+     * Delegates EIF scoring to EifService — the sole owner of the EIF HTTP call.
+     * Signature kept identical so TransactionService needs no changes.
+     *
+     * Feature order MUST match train_eif.py RAW_FEATURES exactly:
+     * [velocity_score, burst_score, suspicious_neighbor_count,
+     *  ja3_reuse_count, device_reuse_count, ip_reuse_count]
+     */
+    public Mono<Map<String, Object>> scoreEif(
+            double velocityScore,
+            double burstScore,
+            double suspiciousNeighborCount,
+            double ja3ReuseCount,
+            double deviceReuseCount,
+            double ipReuseCount) {
 
-                // Extract topFactors
-                Map<String, Double> topFactors = new java.util.LinkedHashMap<>();
-                if (r.has("topFactors")) {
-                    r.get("topFactors").fields().forEachRemaining(e ->
-                            topFactors.put(e.getKey(), e.getValue().asDouble()));
-                }
-
-                System.out.printf("🔬 EIF RESULT → score=%.4f | %s%n", score, explanation);
-
-                return (Map<String, Object>) new java.util.LinkedHashMap<String, Object>() {{
-                    put("score", score);
-                    put("confidence", r.path("confidence").asDouble(0.0));
-                    put("explanation", explanation);
-                    put("topFactors", topFactors);
-                }};
-            })
-            .timeout(java.time.Duration.ofSeconds(5))
-            .onErrorResume(e -> {
-                System.err.println("⚠️ EIF skipped: " + e.getMessage());
-                return Mono.just(Map.of("score", 0.0, "explanation", "", "topFactors", Map.of()));
-            });
-
-}
+        return eifService.score(java.util.List.of(
+                velocityScore,
+                burstScore,
+                suspiciousNeighborCount,
+                ja3ReuseCount,
+                deviceReuseCount,
+                ipReuseCount
+        ));
+    }
 }

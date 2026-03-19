@@ -17,10 +17,12 @@ public class HealthController {
     
     private final WebClient aiWebClient;
     
-    public HealthController() {
-    this.aiWebClient = WebClient.builder()
-            .baseUrl("http://56.228.10.113:8001")
-            .build();
+    public HealthController(
+            @Value("${ai.service.url:http://56.228.10.113:8001}") String aiServiceUrl
+    ) {
+        this.aiWebClient = WebClient.builder()
+                .baseUrl(aiServiceUrl)
+                .build();
     }
 
     

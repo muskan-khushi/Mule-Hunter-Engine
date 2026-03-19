@@ -6,6 +6,8 @@ import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Step 4 — Account Daily Aggregate
@@ -32,6 +34,10 @@ public class AccountAggregate {
     private double totalIn7d     = 0.0;
     private int    txnCount7d    = 0;
     private int    uniqueCounterparties7d = 0;
+    // Tracks distinct counterparty IDs seen in the 7d window.
+    // uniqueCounterparties7d is derived from this set's size.
+    // The set is cleared when the 7d window resets.
+    private Set<String> seenCounterparties7d = new HashSet<>();
 
     // ── JA3 / Device signals ───────────────────────────────────────────
     private int    ja3ReuseCount    = 0;
@@ -81,6 +87,12 @@ public class AccountAggregate {
 
     public int  getUniqueCounterparties7d()        { return uniqueCounterparties7d; }
     public void setUniqueCounterparties7d(int v)   { this.uniqueCounterparties7d = v; }
+
+    public Set<String> getSeenCounterparties7d() {
+        if (this.seenCounterparties7d == null) this.seenCounterparties7d = new HashSet<>();
+        return seenCounterparties7d;
+    }
+    public void setSeenCounterparties7d(Set<String> v) { this.seenCounterparties7d = v; }
 
     public int  getJa3ReuseCount()                 { return ja3ReuseCount; }
     public void setJa3ReuseCount(int v)            { this.ja3ReuseCount = v; }

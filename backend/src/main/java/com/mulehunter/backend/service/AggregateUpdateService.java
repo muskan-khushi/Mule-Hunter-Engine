@@ -83,6 +83,7 @@ public class AggregateUpdateService {
                         agg.setTotalIn7d(0.0);
                         agg.setTxnCount7d(0);
                         agg.setUniqueCounterparties7d(0);
+                        agg.getSeenCounterparties7d().clear(); // reset dedup set with window
                         agg.setWindowStart7d(now);
                     }
 
@@ -97,7 +98,12 @@ public class AggregateUpdateService {
 
                     agg.setTxnCount24h(agg.getTxnCount24h() + 1);
                     agg.setTxnCount7d(agg.getTxnCount7d() + 1);
-                    agg.setUniqueCounterparties7d(agg.getUniqueCounterparties7d() + 1);
+                    // Only count a counterparty once per 7d window.
+                    // The set deduplicates; uniqueCounterparties7d mirrors its size.
+                    if (counterpartyId != null) {
+                        agg.getSeenCounterparties7d().add(counterpartyId);
+                        agg.setUniqueCounterparties7d(agg.getSeenCounterparties7d().size());
+                    }
 
                     // Update identity reuse signals (only for source account)
                     if (ja3 != null)        agg.setJa3ReuseCount(agg.getJa3ReuseCount() + 1);
