@@ -4,6 +4,7 @@ import { useState, useEffect,useRef } from "react";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import VisualAnalyticsCard from "../components/VisualAnalyticsCard";
+import { v4 as uuidv4 } from "uuid";
 
 
 const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_BASE_URL!;
@@ -114,7 +115,7 @@ export default function FakeTransactionPage() {
       completedRef.current = false;
 
     const transactionData = {
-    transactionId: crypto.randomUUID(),
+    transactionId: uuidv4(),
     sourceAccount: form.source,
     targetAccount: form.target,
     amount: Number(form.amount),

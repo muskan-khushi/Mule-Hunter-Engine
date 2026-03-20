@@ -7,6 +7,7 @@ import {
   Zap, RefreshCw, BarChart3, Fingerprint, Shuffle,
   Link2, Network, Boxes, ChevronRight, Waves,
 } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
 
 const ML_URL  = "http://56.228.10.113:8001";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://13.49.23.31:8082";
@@ -301,7 +302,7 @@ function SimulatorSection() {
           "X-JA3-Fingerprint": form.ja3,
         },
         body: JSON.stringify({
-          transactionId:  crypto.randomUUID(),
+          transactionId: uuidv4(),
           sourceAccount:  form.sid,
           targetAccount:  form.did,
           amount:         Number(form.amt),
@@ -1107,7 +1108,7 @@ function FusionSection() {
         <div className={`w-2 h-2 rounded-full shrink-0 ${hasLive ? "bg-[#CAFF33]" : "bg-white/30"}`}
           style={hasLive ? { boxShadow: "0 0 8px #CAFF33" } : {}} />
         <p className={`text-sm font-medium ${hasLive ? "text-[#CAFF33]/80" : "text-white/65"}`}>
-          {hasLive ? "Showing live scores from the last scored transaction." : "Illustrative values — score a transaction in Simulator for real fusion breakdown."}
+          {hasLive ? "Showing live scores" : "Illustrative values — score a transaction in Simulator for real fusion breakdown."}
         </p>
         {hasLive && <div className={`ml-auto px-4 py-1.5 rounded-xl border text-sm font-black ${dc(decision)}`}>{decision}</div>}
       </div>
