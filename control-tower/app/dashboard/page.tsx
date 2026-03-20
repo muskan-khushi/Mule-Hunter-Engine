@@ -7,6 +7,7 @@ import {
   Zap, RefreshCw, BarChart3, Fingerprint, Shuffle,
   Link2, Network, Boxes, ChevronRight, Waves,
 } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
 
 const ML_URL  = "http://56.228.10.113:8001";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://13.49.23.31:8082";
@@ -301,7 +302,7 @@ function SimulatorSection() {
           "X-JA3-Fingerprint": form.ja3,
         },
         body: JSON.stringify({
-          transactionId:  crypto.randomUUID(),
+          transactionId: uuidv4(),
           sourceAccount:  form.sid,
           targetAccount:  form.did,
           amount:         Number(form.amt),
