@@ -116,7 +116,7 @@ public class TransactionService {
                                                 behavior.getBurstScore(),
                                                 graph.getSuspiciousNeighborCount());
 
-                                        // Step 7 — AI (GNN) + JA3 + EIF all in parallel
+                                        // Step 7 — AI (GNN) + JA3 in parallel
                                         return Mono.zip(
                                                 aiRiskService.analyzeTransaction(
                                                         sourceNodeId, targetNodeId, amount,
@@ -126,25 +126,24 @@ public class TransactionService {
                                                         .defaultIfEmpty(new AiRiskResult()),
 
                                                 ja3SecurityService.callJa3Risk(savedTx, ja3)
-                                                        .defaultIfEmpty(Map.of()),
+                                                        .defaultIfEmpty(Map.of())
 
-                                                // FIX: use safe null-coalescing for all reuse counts
-                                                // They are set in Step 3 but may be null if identity
-                                                // collection partially failed.
-                                                aiRiskService.scoreEif(
-                                                        behavior.getTransactionVelocityScore(),
-                                                        behavior.getBurstScore(),
-                                                        (double) graph.getSuspiciousNeighborCount(),
-                                                        savedTx.getJa3ReuseCount()    == null ? 0.0 : savedTx.getJa3ReuseCount().doubleValue(),
-                                                        savedTx.getDeviceReuseCount() == null ? 0.0 : savedTx.getDeviceReuseCount().doubleValue(),
-                                                        savedTx.getIpReuseCount()     == null ? 0.0 : savedTx.getIpReuseCount().doubleValue()
-                                                )
-
-                                        ).map(results -> {
+                                        ).flatMap(results -> {
 
                                             AiRiskResult        ai     = results.getT1();
                                             Map<String, Object> ja3Map = results.getT2();
-                                            Map<String, Object> eifMap = results.getT3();
+
+                                            // Step 8 — EIF requires AI features, execute sequentially
+                                            return aiRiskService.scoreEif(
+                                                    behavior.getTransactionVelocityScore(),
+                                                    behavior.getBurstScore(),
+                                                    (double) graph.getSuspiciousNeighborCount(),
+                                                    savedTx.getIpReuseCount()  == null ? 0.0 : savedTx.getIpReuseCount().doubleValue(),
+                                                    savedTx.getJa3ReuseCount() == null ? 0.0 : savedTx.getJa3ReuseCount().doubleValue(),
+                                                    ai.getClusterRiskScore(),
+                                                    ai.isMuleRingMember() ? 1.0 : 0.0,
+                                                    ai.getCentralityScore()
+                                            ).map(eifMap -> {
 
                                             // ── EIF scores ───────────────────────────────────
                                             double eifScore = toDouble(eifMap.get("score"));
@@ -255,6 +254,7 @@ public class TransactionService {
                                             savedTx.setJa3Security(ja3Sec);
 
                                             return savedTx;
+                                            });
                                         });
                                     })
                             )

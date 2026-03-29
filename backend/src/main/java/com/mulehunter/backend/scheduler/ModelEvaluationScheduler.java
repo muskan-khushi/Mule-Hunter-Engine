@@ -16,6 +16,6 @@ public class ModelEvaluationScheduler {
     @Scheduled(cron = "0 0 2 * * ?") // runs daily at 2 AM
     public void runEvaluation() {
         System.out.println("⏰ Running scheduled model evaluation...");
-        evaluationService.evaluateModels().subscribe();
+        evaluationService.evaluateModels(false).subscribe();
     }
 }

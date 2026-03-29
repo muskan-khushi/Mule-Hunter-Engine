@@ -1,6 +1,7 @@
 package com.mulehunter.backend.service;
 
 import com.mulehunter.backend.DTO.EifResponse;
+import com.mulehunter.backend.DTO.MetricsResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -67,6 +68,18 @@ public class EifService {
                             "explanation", "",
                             "topFactors",  Map.of()
                     ));
+                });
+    }
+
+    public Mono<MetricsResponse.OfflineMetrics> getMetrics() {
+        return webClient.get()
+                .uri("/v1/eif/metrics")
+                .retrieve()
+                .bodyToMono(MetricsResponse.OfflineMetrics.class)
+                .timeout(java.time.Duration.ofSeconds(5))
+                .onErrorResume(e -> {
+                    System.err.println("⚠️ EIF metrics skipped: " + e.getMessage());
+                    return Mono.empty();
                 });
     }
 }

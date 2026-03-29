@@ -5,12 +5,12 @@ import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import {
   Zap, RefreshCw, BarChart3, Fingerprint, Shuffle,
-  Link2, Network, Boxes, ChevronRight, Waves, Menu, X,
+  Link2, Network, Boxes, ChevronRight, Waves, Menu, X, Download
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 
-const ML_URL  = "http://56.228.10.113:8001";
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://13.49.23.31:8082";
+const ML_URL  = process.env.NEXT_PUBLIC_ML_URL ?? "http://localhost:8001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 const NAV = [
   { id: "simulator",  label: "Simulator",  icon: Zap         },
@@ -240,14 +240,17 @@ function Field({ label, k, form, setForm }: { label: string; k: string; form: Re
     </div>
   );
 }
-function PageHeading({ eyebrow, title, accent, description }: { eyebrow: string; title: string; accent: string; description: string }) {
+function PageHeading({ eyebrow, title, accent, description, action }: { eyebrow: string; title: string; accent: string; description: string; action?: React.ReactNode }) {
   return (
-    <div className="mb-6 sm:mb-10">
-      <Eyebrow>{eyebrow}</Eyebrow>
-      <h2 className="text-2xl sm:text-[2.6rem] font-black tracking-tight leading-none mb-2 sm:mb-3">
-        {title} <span className="text-[#CAFF33]">{accent}</span>
-      </h2>
-      <p className="text-sm text-white/75 max-w-lg leading-relaxed">{description}</p>
+    <div className="mb-6 sm:mb-10 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+      <div className="flex-1">
+        <Eyebrow>{eyebrow}</Eyebrow>
+        <h2 className="text-2xl sm:text-[2.6rem] font-black tracking-tight leading-none mb-2 sm:mb-3">
+          {title} <span className="text-[#CAFF33]">{accent}</span>
+        </h2>
+        <p className="text-sm text-white/75 max-w-lg leading-relaxed">{description}</p>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -312,16 +315,31 @@ function SimulatorSection() {
         }),
       });
 
+      let data;
       if (!res.ok) {
-        let errText = `HTTP ${res.status}`;
-        try { const body = await res.json(); errText = JSON.stringify(body); } catch {}
-        setApiError(`Backend returned error: ${errText}`);
-        setStep(15);
-        setLoading(false);
-        return;
+        let isBlockVerdict = false;
+        if (res.status === 403) {
+          try {
+            data = await res.json();
+            if (data && data.decision === "BLOCK") isBlockVerdict = true;
+          } catch {}
+        }
+        
+        if (!isBlockVerdict) {
+          let errText = `HTTP ${res.status}`;
+          if (data) {
+            errText = JSON.stringify(data);
+          } else {
+            try { const body = await res.json(); errText = JSON.stringify(body); } catch {}
+          }
+          setApiError(`Backend returned error: ${errText}`);
+          setStep(15);
+          setLoading(false);
+          return;
+        }
+      } else {
+        data = await res.json();
       }
-
-      const data = await res.json();
 
       const mapped = {
         decision:       data.decision                    ?? "REVIEW",
@@ -1580,12 +1598,13 @@ function MetricsSection() {
   const gnnPrec = gnnEval?.test?.precision ?? 0;
   const gnnRec  = gnnEval?.test?.recall    ?? 0;
   const gnnAcc  = gnnEval?.test?.accuracy  ?? 0;
-  const gnnFpr  = gnnEval?.test?.confusion_matrix
-    ? (() => { const cm = gnnEval.test.confusion_matrix; const fp = cm[0]?.[1]??0; const tn = cm[0]?.[0]??0; return fp+tn>0?fp/(fp+tn):0; })()
-    : 0;
-  const cm = gnnEval?.test?.confusion_matrix;
   const sb = springMetrics;
+  const gnnFpr  = sb?.offlineGnn?.fpr ?? 0;
+  const cm = gnnEval?.test?.confusion_matrix;
   const hasSb = sb && (sb.combined || sb.gnn || sb.eif);
+
+  const offGnn = sb?.offlineGnn;
+  const offEif = sb?.offlineEif;
 
   const MODELS = [
     {
@@ -1593,13 +1612,18 @@ function MetricsSection() {
       color: "#CAFF33", border: "border-[#CAFF33]/[0.1]", activeBg: "bg-[#CAFF33]/[0.07]",
       tag: "SAGE → GAT → SAGE", threshold: "≥ 0.50", weight: "40%",
       role: "Structural fraud patterns via message-passing across the account transaction graph.",
-      trainF1: gnnF1, trainAuc: gnnAuc, trainPrec: gnnPrec, trainRec: gnnRec, trainAcc: gnnAcc, trainFpr: gnnFpr,
+      trainF1:   offGnn?.f1        ?? gnnF1,
+      trainAuc:  offGnn?.auc       ?? gnnAuc,
+      trainPrec: offGnn?.precision ?? gnnPrec,
+      trainRec:  offGnn?.recall    ?? gnnRec,
+      trainAcc:  offGnn?.accuracy  ?? gnnAcc,
+      trainFpr:  offGnn?.fpr       ?? gnnFpr,
       live: sb?.gnn, confMatrix: cm,
       details: [
         ["Nodes in graph",    nodesCount > 0 ? nodesCount.toLocaleString() : "—"],
         ["Rings cached",      ringsCached > 0 ? String(ringsCached) : "—"],
         ["Logit cache",       logitCache > 0 ? `${logitCache.toLocaleString()} nodes` : "—"],
-        ["Optimal threshold", f4(gnnThreshold, 4)],
+        ["Optimal threshold", f4(offGnn?.threshold ?? gnnThreshold, 4)],
         ["Version",           version],
         ["Inference",         "O(1) logit cache"],
       ],
@@ -1609,13 +1633,18 @@ function MetricsSection() {
       color: "#a855f7", border: "border-purple-500/[0.1]", activeBg: "bg-purple-500/[0.06]",
       tag: "Unsupervised anomaly", threshold: "≥ 0.60", weight: "20%",
       role: "Behavioral anomaly detection — catches mule patterns invisible to graph structure.",
-      trainF1: 0, trainAuc: 0, trainPrec: 0, trainRec: 0, trainAcc: 0, trainFpr: 0,
+      trainF1:   offEif?.f1        ?? 0,
+      trainAuc:  offEif?.auc       ?? 0,
+      trainPrec: offEif?.precision ?? 0,
+      trainRec:  offEif?.recall    ?? 0,
+      trainAcc:  offEif?.accuracy  ?? 0,
+      trainFpr:  0,
       live: sb?.eif, confMatrix: null,
       details: [
         ["Model type",       "Extended Isolation Forest"],
         ["Trees",            "500  (ExtensionLevel=1)"],
         ["Input features",   "6 raw → 12 expanded"],
-        ["Threshold dir.",   "path_length ≤ threshold"],
+        ["Optimal threshold", f4(offEif?.threshold ?? 0.4691, 4)],
         ["Scaler",           "RobustScaler"],
         ["Endpoint",         "/v1/eif/score"],
       ],
@@ -1625,7 +1654,9 @@ function MetricsSection() {
       color: "#3b82f6", border: "border-blue-500/[0.1]", activeBg: "bg-blue-500/[0.05]",
       tag: "Weighted ensemble", threshold: "≥ 0.35", weight: "100%",
       role: "Final decision layer — blends GNN, EIF, behavior, graph, and JA3 signals.",
-      trainF1: 0, trainAuc: 0, trainPrec: 0, trainRec: 0, trainAcc: 0, trainFpr: 0,
+      trainF1:   ( (offGnn?.f1 ?? 0) * 0.5 + (offEif?.f1 ?? 0) * 0.5 ),
+      trainAuc:  ( (offGnn?.auc ?? 0) * 0.5 + (offEif?.auc ?? 0) * 0.5 ),
+      trainPrec: 0, trainRec: 0, trainAcc: 0, trainFpr: 0,
       live: sb?.combined, confMatrix: null,
       details: [
         ["GNN weight",       "40%"],
@@ -1677,7 +1708,15 @@ function MetricsSection() {
   return (
     <div>
       <PageHeading eyebrow="Evaluation Results" title="Model" accent="Performance"
-        description="All three models evaluated equally — live scores from your transaction database plus training benchmarks where available." />
+        description="All three models evaluated equally — live scores from your transaction database plus training benchmarks where available."
+        action={
+          <a href={`${API_URL}/api/admin/evaluate-models/download`} download
+             className="flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-[#CAFF33] text-black font-black text-[11px] uppercase tracking-[0.15em] hover:bg-[#CAFF33]/90 transition-all shadow-[0_0_20px_rgba(202,255,51,0.25)] hover:shadow-[0_0_30px_rgba(202,255,51,0.45)] active:scale-95 group">
+            <Download className="w-4 h-4 transition-transform group-hover:-translate-y-0.5" />
+            Download PDF Report
+          </a>
+        }
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
         {MODELS.map(m => {
@@ -1750,43 +1789,63 @@ function MetricsSection() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
           <div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/65 mb-5">
-              {active.live ? "Live Eval (DB)" : active.id === "gnn" ? "Training Eval" : "No Eval Yet"}
-            </p>
+            <div className="flex justify-between items-center mb-5">
+              <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/65">Scientific Benchmark</p>
+              <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-black tracking-widest uppercase">OFFLINE</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { k: "F1 Score",  v: active.trainF1   },
+                { k: "Precision", v: active.trainPrec },
+                { k: "Recall",    v: active.trainRec  },
+                { k: "Accuracy",  v: active.trainAcc  },
+              ].map(({ k, v }) => <Arc key={k} value={v} label={k} color={active.color} />)}
+            </div>
+            {active.trainAuc > 0 && (
+               <div className="mt-5 p-4 rounded-xl border border-white/[0.04] bg-white/[0.01]">
+                 <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] text-white/65 font-bold tracking-widest uppercase">AUC-ROC Score</span>
+                    <span className={`text-base font-black font-mono ${active.trainAuc > 0.95 ? "text-[#CAFF33]" : "text-white"}`}>{f4(active.trainAuc, 4)}</span>
+                 </div>
+                 <Bar label="model capability" value={active.trainAuc} color={active.color} />
+               </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-5">
+              <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/65">Operational Audit</p>
+              <span className={`text-[8px] px-1.5 py-0.5 rounded font-black tracking-widest uppercase ${active.live ? "bg-[#CAFF33]/20 text-[#CAFF33]" : "bg-white/10 text-white/60"}`}>
+                {active.live ? "LIVE AUDIT" : "NO DATA"}
+              </span>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {(() => {
-                const d = active.live ?? (active.id === "gnn" ? {
-                  f1Score: gnnF1, precision: gnnPrec, recall: gnnRec, accuracy: gnnAcc
-                } : null);
+                const d = active.live;
                 if (!d) return (
-                  <div className="col-span-2 py-6 text-center">
-                    <p className="text-xs text-white/60">
-                      {springError ? "Spring Boot unreachable"
-                        : active.id === "eif" ? "EIF is unsupervised — train labels not available offline. Live eval populates after transactions."
-                        : "No eval data yet"}
-                    </p>
+                  <div className="col-span-2 py-6 text-center border border-dashed border-white/10 rounded-2xl">
+                    <p className="text-[10px] text-white/40 uppercase tracking-widest">Awaiting Re-score</p>
                   </div>
                 );
                 return [
-                  { k: "F1",        v: d.f1Score   ?? 0 },
+                  { k: "F1 Score",  v: d.f1Score   ?? 0 },
                   { k: "Precision", v: d.precision  ?? 0 },
                   { k: "Recall",    v: d.recall     ?? 0 },
                   { k: "Accuracy",  v: d.accuracy   ?? 0 },
                 ].map(({ k, v }) => <Arc key={k} value={v} label={k} color={active.color} />);
               })()}
             </div>
-            {(active.live || (active.id === "gnn" && gnnFpr > 0)) && (
-              <div className="mt-5 grid grid-cols-2 gap-3 pt-4 border-t border-white/[0.04]">
+            {active.live && (
+              <div className="mt-5 space-y-2">
                 {[
-                  { k: "FPR", v: active.live?.fpr ?? gnnFpr,         tip: "False Positive Rate" },
-                  { k: "FNR", v: active.live?.fnr ?? (gnnRec > 0 ? 1 - gnnRec : 0), tip: "False Negative Rate" },
-                ].map(({ k, v, tip }) => (
-                  <div key={k} className="p-3 rounded-xl border border-white/[0.04]">
-                    <p className="text-[8px] text-white/65 mb-1">{tip}</p>
-                    <p className="text-base font-black font-mono text-yellow-400">{v > 0 ? f4(v, 4) : "—"}</p>
-                    <p className="text-[8px] text-white/55 mt-0.5">{k}</p>
+                  { k: "False Positive Rate", v: active.live.fpr, c: "text-yellow-400" },
+                  { k: "False Negative Rate", v: active.live.fnr, c: "text-red-400" },
+                ].map(({ k, v, c }) => (
+                  <div key={k} className="flex justify-between items-center p-3 rounded-xl border border-white/[0.04] bg-white/[0.01]">
+                    <span className="text-[9px] text-white/60 uppercase tracking-widest font-bold">{k}</span>
+                    <span className={`text-xs font-black font-mono ${c}`}>{f4(v, 4)}</span>
                   </div>
                 ))}
               </div>
@@ -1888,9 +1947,23 @@ function MetricsSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(["f1Score","precision","recall","accuracy","fpr","fnr"] as const).map(metric => {
-                    const label = { f1Score:"F1", precision:"Precision", recall:"Recall", accuracy:"Accuracy", fpr:"FPR ↓", fnr:"FNR ↓" }[metric];
-                    const values = MODELS.map(m => { if (!m.live) return null; return (m.live as any)[metric] ?? null; });
+                  {(["trainAuc","trainF1","f1Score","precision","recall","accuracy","fpr","fnr"] as const).map(metric => {
+                    const label = { 
+                      trainAuc:   "Scientific AUC",
+                      trainF1:    "Scientific F1",
+                      f1Score:    "Audit F1", 
+                      precision:  "Audit Precision", 
+                      recall:     "Audit Recall", 
+                      accuracy:   "Audit Accuracy", 
+                      fpr:        "Audit FPR ↓", 
+                      fnr:        "Audit FNR ↓" 
+                    }[metric];
+                    const values = MODELS.map(m => { 
+                      if (metric === "trainAuc") return m.trainAuc;
+                      if (metric === "trainF1")  return m.trainF1;
+                      if (!m.live) return null; 
+                      return (m.live as any)[metric] ?? null; 
+                    });
                     const best = Math.max(...values.filter((v): v is number => v !== null));
                     return (
                       <tr key={metric} className="border-b border-white/[0.03] hover:bg-white/[0.01]">
@@ -1898,12 +1971,13 @@ function MetricsSection() {
                         {MODELS.map((m, i) => {
                           const v = values[i];
                           const isLower = metric === "fpr" || metric === "fnr";
+                          const isScientific = metric.startsWith("train");
                           const minVal = isLower ? Math.min(...values.filter((x): x is number => x !== null)) : 0;
                           const actuallyBest = isLower ? (v !== null && Math.abs(v - minVal) < 0.0001) : (v !== null && Math.abs(v - best) < 0.0001);
                           return (
                             <td key={m.id} className="px-3 sm:px-4 py-3 text-right">
-                              {v !== null ? (
-                                <span className={`text-xs font-black font-mono ${actuallyBest ? "" : "text-white/70"}`}
+                              {v !== null && v > 0 ? (
+                                <span className={`text-xs font-black font-mono ${actuallyBest ? "" : isScientific ? "text-white/90" : "text-white/70"}`}
                                   style={actuallyBest ? { color: m.color } : {}}>
                                   {f4(v, 4)}
                                   {actuallyBest && <span className="ml-1 text-[8px] opacity-60">★</span>}

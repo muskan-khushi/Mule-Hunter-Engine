@@ -1,6 +1,7 @@
 package com.mulehunter.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mulehunter.backend.DTO.MetricsResponse;
 import com.mulehunter.backend.model.AiRiskResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -166,26 +167,57 @@ public class AiRiskService {
     /**
      * Delegates EIF scoring to EifService — the sole owner of the EIF HTTP call.
      * Signature kept identical so TransactionService needs no changes.
-     *
-     * Feature order MUST match train_eif.py RAW_FEATURES exactly:
-     * [velocity_score, burst_score, suspicious_neighbor_count,
-     *  ja3_reuse_count, device_reuse_count, ip_reuse_count]
      */
     public Mono<Map<String, Object>> scoreEif(
             double velocityScore,
             double burstScore,
             double suspiciousNeighborCount,
+            double ipReuseCount,
             double ja3ReuseCount,
-            double deviceReuseCount,
-            double ipReuseCount) {
+            double communityFraudRate,
+            double ringMembership,
+            double networkRiskScore) {
 
         return eifService.score(java.util.List.of(
                 velocityScore,
                 burstScore,
                 suspiciousNeighborCount,
+                ipReuseCount,
                 ja3ReuseCount,
-                deviceReuseCount,
-                ipReuseCount
+                communityFraudRate,
+                ringMembership,
+                networkRiskScore
         ));
+    }
+
+    public Mono<MetricsResponse.OfflineMetrics> getGnnMetrics() {
+        return aiWebClient.get()
+                .uri("/metrics")
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .map(this::mapGnnMetrics)
+                .timeout(java.time.Duration.ofSeconds(5))
+                .onErrorResume(e -> {
+                    System.err.println("⚠️ GNN metrics skipped: " + e.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    public Mono<MetricsResponse.OfflineMetrics> getEifMetrics() {
+        return eifService.getMetrics();
+    }
+
+    private MetricsResponse.OfflineMetrics mapGnnMetrics(JsonNode r) {
+        MetricsResponse.OfflineMetrics m = new MetricsResponse.OfflineMetrics();
+        if (r.has("test")) {
+            JsonNode test = r.get("test");
+            m.accuracy  = test.path("accuracy").asDouble(0.0);
+            m.precision = test.path("precision").asDouble(0.0);
+            m.recall    = test.path("recall").asDouble(0.0);
+            m.f1        = test.path("f1").asDouble(0.0);
+            m.auc        = test.path("auc_roc").asDouble(0.0);
+            m.threshold = test.path("threshold_used").asDouble(0.5);
+        }
+        return m;
     }
 }

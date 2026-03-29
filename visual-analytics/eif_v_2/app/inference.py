@@ -39,30 +39,22 @@ from .config import (
     FEATURE_EXPLANATIONS,
 )
 
-# ── Feature names (12 expanded — must match expand_features output order) ─────
 FEATURE_NAMES = [
-    "velocity_score",    # 0  — raw
-    "burst_score",       # 1  — raw
-    "neighbors",         # 2  — raw
-    "ja3_reuse",         # 3  — raw
-    "device_reuse",      # 4  — raw
-    "ip_reuse",          # 5  — raw
-    "infra_risk",        # 6  — ja3 + device + ip
-    "velocity_burst",    # 7  — velocity * burst
-    "neighbor_velocity", # 8  — neighbors * velocity
-    "device_ip",         # 9  — device * ip
-    "ja3_weighted",      # 10 — 0.6*ja3 + 0.25*device + 0.15*ip
-    "burst_neighbor",    # 11 — burst * neighbors
+    "velocity", "burst", "neighbors",
+    "ip", "ja3",
+    "comm_fraud", "ring", "net_risk",
+    "comm_ring", "comm_burst", "comm_velocity",
+    "neighbor_comm", "ip_comm", "velocity_burst",
 ]
 
 # Merge explanations — derived keys extend the base dict from config
 _DERIVED_EXPLANATIONS = {
-    "infra_risk":        "Combined infrastructure reuse risk (JA3 + device + IP)",
-    "velocity_burst":    "High velocity combined with transaction burst",
-    "neighbor_velocity": "Fast activity through suspicious network connections",
-    "device_ip":         "Device and IP both shared across multiple accounts",
-    "ja3_weighted":      "Weighted TLS fingerprint reuse signal",
-    "burst_neighbor":    "Burst activity through suspicious neighbours",
+    "comm_ring":         "High community fraud combined with money laundering ring membership",
+    "comm_burst":        "Erratic transaction bursts in a high-risk network neighborhood",
+    "comm_velocity":     "High transaction velocity within a fraudulent community",
+    "neighbor_comm":     "Activity spread across risky peers within coordinated fraud rings",
+    "ip_comm":           "Infrastructure IP sharing detected within a fraud cluster",
+    "velocity_burst":    "High transaction velocity concurrent with account balance bursts",
 }
 # Config explanations take precedence for any overlapping keys
 ALL_EXPLANATIONS = {**_DERIVED_EXPLANATIONS, **FEATURE_EXPLANATIONS}
@@ -81,10 +73,10 @@ print("✅ Scaler loaded")
 with open(METADATA_PATH) as f:
     metadata = json.load(f)
 
-# threshold is the 5th percentile of training path lengths (anomaly end)
-# path_length <= threshold  →  anomaly  →  fraud score > 0.5
+# threshold is the anomaly boundary (e.g. 95th percentile)
+# EIF score >= threshold  →  anomaly  →  fraud score > 0.5
 threshold = metadata.get("threshold", 0.0)
-print(f"✅ Threshold loaded: {threshold:.4f}  (path_length ≤ this → anomaly)")
+print(f"✅ Threshold loaded: {threshold:.4f}  (score ≥ this → anomaly)")
 
 # ── Load training data ────────────────────────────────────────────────────────
 training_data = np.load(str(TRAIN_DATA_PATH))
@@ -93,11 +85,11 @@ print(f"✅ Training data loaded: shape={training_data.shape}")
 # ── Rebuild EIF model ─────────────────────────────────────────────────────────
 model = iForest(
     training_data,
-    ntrees=500,
-    sample_size=min(256, len(training_data)),
-    ExtensionLevel=1,
+    ntrees=metadata.get("ntrees", 100),
+    sample_size=metadata.get("sample_size", min(256, len(training_data))),
+    ExtensionLevel=metadata.get("extension_level", 0),
 )
-print("✅ EIF model rebuilt")
+print("✅ EIF model rebuilt from dynamic metadata")
 print("✅ Service ready\n")
 
 
@@ -105,25 +97,24 @@ print("✅ Service ready\n")
 
 def expand_features(features):
     """
-    Expand 6 raw features to 12 by adding cross-product signals.
-    Input order must match train_eif.py RAW_FEATURES exactly:
-      [velocity_score, burst_score, suspicious_neighbor_count,
-       ja3_reuse_count, device_reuse_count, ip_reuse_count]
+    Expand 8 raw features to 14 by adding cross-product signals.
+    Input order must match config.py FEATURE_NAMES exactly.
     """
-    velocity, burst, neighbors, ja3, device, ip = features
+    velocity, burst, neighbors, ip, ja3, comm_fraud, ring, net_risk = features
 
-    infra_risk        = ja3 + device + ip
-    velocity_burst    = velocity * burst
-    neighbor_velocity = neighbors * velocity
-    device_ip         = device * ip
-    ja3_weighted      = 0.6 * ja3 + 0.25 * device + 0.15 * ip
-    burst_neighbor    = burst * neighbors
+    comm_ring       = comm_fraud * ring
+    comm_burst      = comm_fraud * burst
+    comm_velocity   = comm_fraud * velocity
+    neighbor_comm   = neighbors  * comm_fraud
+    ip_comm         = ip         * comm_fraud
+    velocity_burst  = velocity   * burst
 
     return [
         velocity, burst, neighbors,
-        ja3, device, ip,
-        infra_risk, velocity_burst, neighbor_velocity,
-        device_ip, ja3_weighted, burst_neighbor,
+        ip, ja3,
+        comm_fraud, ring, net_risk,
+        comm_ring, comm_burst, comm_velocity,
+        neighbor_comm, ip_comm, velocity_burst,
     ]
 
 
@@ -143,8 +134,8 @@ def compute_feature_importance(model, X_scaled, base_path_length):
         X_copy = X_scaled.copy()
         X_copy[0, i] = 0.0
         new_path = model.compute_paths(X_copy)[0]
-        # Positive: feature pushed path DOWN (toward anomaly)
-        impacts[name] = float(base_path_length - new_path)
+        # Positive: feature pushed score UP (toward anomaly)
+        impacts[name] = float(new_path - base_path_length)
     return impacts
 
 
@@ -169,9 +160,9 @@ def score_eif(features):
 
     Parameters
     ----------
-    features : list of 6 floats
+    features : list of 8 floats
         [velocity_score, burst_score, suspicious_neighbor_count,
-         ja3_reuse_count, device_reuse_count, ip_reuse_count]
+         ip_reuse_count, ja3_reuse_count, community_fraud_rate_feat, ring_membership_feat, network_risk_score]
 
     Returns
     -------
@@ -184,8 +175,8 @@ def score_eif(features):
     print("──────────────────────────────")
     print("Raw features:", features)
 
-    if len(features) != 6:
-        raise ValueError(f"Expected 6 features, got {len(features)}")
+    if len(features) != 8:
+        raise ValueError(f"Expected 8 features, got {len(features)}")
 
     # 1. Expand
     expanded = expand_features(features)
@@ -194,34 +185,23 @@ def score_eif(features):
     # 2. Scale
     X_scaled = scaler.transform(X)
 
-    # 3. Get path length from EIF
-    #    compute_paths() returns average path length:
-    #      SHORT path (low value) → easy to isolate → ANOMALY
-    #      LONG  path (high value) → hard to isolate → NORMAL
+    # 3. Get score from EIF
+    #    compute_paths() returns a normalized anomaly score [0, 1]
+    #      score ~ 1.0 → ANOMALY
+    #      score ~ 0.0 → NORMAL
     raw_path = float(model.compute_paths(X_scaled)[0])
-    print(f"Path length: {raw_path:.4f}  |  threshold: {threshold:.4f}")
+    print(f"EIF Score: {raw_path:.4f}  |  threshold: {threshold:.4f}")
 
-    # 4. [FIX 1] Convert path length → anomaly score [0, 1]
+    # 4. [FIX 1] Convert raw score → final calibrated score [0, 1]
     #
-    #    We want:  path_length << threshold  →  score → 1.0  (definitely anomalous)
-    #              path_length == threshold  →  score = 0.5  (decision boundary)
-    #              path_length >> threshold  →  score → 0.0  (definitely normal)
+    #    We want:  raw_path >> threshold  →  score → 1.0  (definitely anomalous)
+    #              raw_path == threshold  →  score = 0.5  (decision boundary)
+    #              raw_path << threshold  →  score → 0.0  (definitely normal)
     #
-    #    Formula: sigmoid(+k * (threshold - raw_path))
-    #      When raw_path < threshold: (threshold - raw_path) > 0 → score > 0.5 ✓
-    #      When raw_path > threshold: (threshold - raw_path) < 0 → score < 0.5 ✓
-    #
-    #    Previous code used sigmoid(-k * (raw - threshold)) which is equivalent to
-    #    sigmoid(+k * (threshold - raw)) but was written as -k*(raw-threshold) which
-    #    equals +k*(threshold-raw) — they ARE mathematically identical!
-    #
-    #    The actual bug was in train_eif.py setting threshold at percentile(95) instead
-    #    of percentile(5). With the wrong threshold value, the formula was effectively
-    #    calibrated to the normal end of the distribution. Now that train_eif.py saves
-    #    the correct 5th-percentile threshold, this formula works correctly.
+    #    Formula: sigmoid(+k * (raw_path - threshold))
     k     = 6.0
-    score = float(1.0 / (1.0 + np.exp(-k * (threshold - raw_path))))
-    print(f"Anomaly score: {score:.4f}")
+    score = float(1.0 / (1.0 + np.exp(-k * (raw_path - threshold))))
+    print(f"Final score: {score:.4f}")
 
     # 5. Feature importance
     impacts     = compute_feature_importance(model, X_scaled, raw_path)

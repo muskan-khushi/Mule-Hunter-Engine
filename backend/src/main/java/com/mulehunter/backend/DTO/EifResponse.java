@@ -7,6 +7,7 @@ public class EifResponse {
     private String model;
     private String version;
     private double score;
+    private int isAnomalous;
     private double confidence;
     private Map<String, Double> topFactors;
     private String explanation;
@@ -16,6 +17,9 @@ public class EifResponse {
 
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
+
+    public int getIsAnomalous() { return isAnomalous; }
+    public void setIsAnomalous(int isAnomalous) { this.isAnomalous = isAnomalous; }
 
     public double getScore() { return score; }
     public void setScore(double score) { this.score = score; }
