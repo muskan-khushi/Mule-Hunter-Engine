@@ -89,7 +89,7 @@ const NavContent = ({ session, onLinkClick }: { session: any, onLinkClick?: () =
     <Link href="/dashboard" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
   Fraud Dashboard
 </Link>
-    <Link href="/pay" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Demo</Link>
+    {/* <Link href="/pay" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Demo</Link> */}
 
     <Link href="/network" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Network</Link>
     <Link href="/stats" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Stats</Link>
