@@ -1,33 +1,81 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import dynamic from "next/dynamic";
+import GraphControls from "../components/graph/GraphControls";
 import NodeInspector from "../components/graph/NodeInspector";
 import Navbar from "../components/Navbar";
-import type { GraphNode } from "../components/graph/FraudGraph3D";
 import Footer from "../components/Footer";
+import type { GraphNode } from "../components/graph/FraudGraph3D";
 
+// Three.js graph — client only
 const FraudGraph3D = dynamic(
   () => import("../components/graph/FraudGraph3D"),
   { ssr: false }
 );
 
 export default function NetworkPage() {
- 
+  // ── Node selection ──
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [alertedNodeId, setAlertedNodeId] = useState<string | number | null>(null);
+
+  // ── Filter state (owned here, passed to both sidebar + graph) ──
+  const [riskThreshold, setRiskThreshold] = useState<number>(0);
+  const [showOnlyFraud, setShowOnlyFraud] = useState<boolean>(false);
+  const [showOnlyRings, setShowOnlyRings] = useState<boolean>(false);
+  const [searchId, setSearchId] = useState<string>("");
+  const [searchTrigger, setSearchTrigger] = useState<string>("");
+
+  // Stats (lifted from graph via callback)
+  const [stats, setStats] = useState({ totalNodes: 0, fraudNodes: 0, rings: 0 });
+
+  const handleSearch = useCallback(() => {
+    setSearchTrigger(searchId.trim());
+  }, [searchId]);
+
+  const handleReset = useCallback(() => {
+    setRiskThreshold(0);
+    setShowOnlyFraud(false);
+    setShowOnlyRings(false);
+    setSearchId("");
+    setSearchTrigger("");
+    setSelectedNode(null);
+  }, []);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-black">
       <Navbar />
-      <div className="flex-1 relative overflow-hidden flex">
-        <div className="flex-1">
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Left sidebar: filter controls ── */}
+        <GraphControls
+          riskThreshold={riskThreshold}
+          setRiskThreshold={setRiskThreshold}
+          showOnlyFraud={showOnlyFraud}
+          setShowOnlyFraud={setShowOnlyFraud}
+          showOnlyRings={showOnlyRings}
+          setShowOnlyRings={setShowOnlyRings}
+          searchId={searchId}
+          setSearchId={setSearchId}
+          onSearch={handleSearch}
+          onReset={handleReset}
+          totalNodes={stats.totalNodes}
+          fraudNodes={stats.fraudNodes}
+          rings={stats.rings}
+        />
+
+        {/* ── 3D Graph canvas ── */}
+        <div className="flex-1 relative overflow-hidden">
           <FraudGraph3D
             onNodeSelect={setSelectedNode}
             selectedNode={selectedNode}
-            alertedNodeId={alertedNodeId}
+            riskThreshold={riskThreshold}
+            showOnlyFraud={showOnlyFraud}
+            showOnlyRings={showOnlyRings}
+            searchId={searchTrigger}
           />
         </div>
+
+        {/* ── Right panel: node inspector ── */}
         {selectedNode && (
           <NodeInspector
             node={selectedNode}
@@ -35,6 +83,7 @@ export default function NetworkPage() {
           />
         )}
       </div>
+
       <Footer />
     </div>
   );

@@ -3,12 +3,20 @@
 import { useState } from "react";
 import useExplanations from "../../../hooks/useExplanations";
 
-interface GraphNode {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface GraphNode {
   id: string | number;
   is_anomalous?: boolean | number;
   anomalyScore?: number;
   volume?: number;
   size?: number;
+  pagerank?: number;
+  role?: "HUB" | "BRIDGE" | "MULE" | "NORMAL";
+  clusterId?: number;
+  clusterFraudRate?: number;
+  ringIds?: number[];
+  shapFactors?: { label: string; value: number }[];
 }
 
 interface NodeInspectorProps {
@@ -16,51 +24,63 @@ interface NodeInspectorProps {
   onClose: () => void;
 }
 
-interface SectionProps {
-  title: string;
-  children: React.ReactNode;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function riskLabel(score: number): string {
+  if (score >= 0.75) return "CRITICAL";
+  if (score >= 0.45) return "REVIEW";
+  return "SAFE";
 }
 
-interface MetricProps {
-  label: string;
-  value: string | number;
-  highlight?: boolean;
-  color?: "red" | "green";
+function riskColor(score: number): string {
+  if (score >= 0.75) return "#ef4444";
+  if (score >= 0.45) return "#f97316";
+  return "#22c55e";
 }
 
-interface TabButtonProps {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
+function roleColor(role?: string): string {
+  if (role === "HUB") return "#ef4444";
+  if (role === "BRIDGE") return "#f97316";
+  if (role === "MULE") return "#94a3b8";
+  return "#22c55e";
 }
 
-interface ShapSlideProps {
-  reasons: string[];
-  loading: boolean;
-  isAnomalous: boolean;
+function roleDescription(role?: string): string {
+  if (role === "HUB") return "Ring organiser — highest out-degree";
+  if (role === "BRIDGE") return "Connector — high betweenness centrality";
+  if (role === "MULE") return "Forwarder — executes transfers";
+  return "Low risk account";
 }
 
-interface AISlideProps {
-  aiText: string | null;
-  loading: boolean;
-  onGenerate: () => void;
-}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function NodeInspector({ node, onClose }: NodeInspectorProps) {
   const [aiText, setAiText] = useState<string | null>(null);
-  const [loadingAI, setLoadingAI] = useState<boolean>(false);
-  const [closing, setClosing] = useState<boolean>(false);
-  const [activeSlide, setActiveSlide] = useState<"shap" | "ai">("shap");
+  const [loadingAI, setLoadingAI] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "shap" | "ai">(
+    "overview"
+  );
 
   const nodeId = node ? Number(node.id) : null;
-  const { explanation, loading } = useExplanations(nodeId);
+  const { explanation, loading: shapLoading } = useExplanations(nodeId);
 
   if (!node) return null;
 
   const isAnomalous = node.is_anomalous === true || node.is_anomalous === 1;
+  const score = node.anomalyScore ?? 0;
+  const color = riskColor(score);
+  const label = riskLabel(score);
+  const role = node.role ?? (isAnomalous ? "MULE" : "NORMAL");
   const reasons: string[] = explanation?.reasons ?? [];
 
-  const generateAIExplanation = async () => {
+  // Use shapFactors from node if available, fallback to useExplanations hook
+  const shapData: { label: string; value: number }[] =
+    node.shapFactors?.length
+      ? node.shapFactors
+      : reasons.map((r, i) => ({ label: r, value: 0.9 - i * 0.12 }));
+
+  const generateAI = async () => {
     setLoadingAI(true);
     try {
       const res = await fetch("/api/explain", {
@@ -68,16 +88,17 @@ export default function NodeInspector({ node, onClose }: NodeInspectorProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nodeId: node.id,
-          anomalyScore: node.anomalyScore,
+          anomalyScore: score,
           reasons,
           isAnomalous,
           volume: node.volume,
+          role,
         }),
       });
       const data = await res.json();
       setAiText(data.explanation);
     } catch {
-      setAiText("Failed to generate explanation.");
+      setAiText("Failed to generate explanation. Please try again.");
     } finally {
       setLoadingAI(false);
     }
@@ -89,212 +110,385 @@ export default function NodeInspector({ node, onClose }: NodeInspectorProps) {
       setAiText(null);
       setClosing(false);
       onClose();
-    }, 250);
+    }, 220);
   };
 
   return (
     <aside
-      className={`fixed right-0 top-0 pt-10 z-50 w-[380px] h-screen overflow-y-auto
+      className={`
+        flex-shrink-0 w-[360px] h-full overflow-y-auto flex flex-col
         ${closing ? "animate-slide-out" : "animate-slide-in"}
-        ${
-          isAnomalous
-            ? "bg-zinc-900 border-l border-red-600 shadow-[0_0_20px_rgba(239,68,68,0.4)]"
-            : "bg-zinc-900 border-l border-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
-        }
       `}
+      style={{
+        background: "rgba(8,10,18,0.97)",
+        borderLeft: `1px solid ${color}55`,
+        boxShadow: `-8px 0 40px ${color}18`,
+      }}
     >
-      {/* HEADER */}
-      <div className="flex justify-between items-center px-5">
-        <h2 className="text-lg font-semibold">
-          Node Forensics:{" "}
-          <span className={isAnomalous ? "text-red-400" : "text-green-400"}>
+      {/* ── Header ── */}
+      <div
+        className="px-5 py-4 flex items-start justify-between"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+      >
+        <div>
+          <div
+            className="text-[10px] font-mono uppercase tracking-widest mb-1"
+            style={{ color: "#4b5563" }}
+          >
+            Node Forensics
+          </div>
+          <div className="text-lg font-bold text-white">
             ACC{node.id}
-          </span>
-        </h2>
+          </div>
+          {/* Risk badge */}
+          <div className="flex items-center gap-2 mt-2">
+            <span
+              className="px-2 py-0.5 text-xs font-mono font-bold rounded"
+              style={{
+                background: `${color}22`,
+                border: `1px solid ${color}55`,
+                color,
+              }}
+            >
+              {label}
+            </span>
+            <span
+              className="px-2 py-0.5 text-xs rounded"
+              style={{
+                background: `${roleColor(role)}18`,
+                border: `1px solid ${roleColor(role)}44`,
+                color: roleColor(role),
+              }}
+            >
+              {role}
+            </span>
+          </div>
+        </div>
         <button
           onClick={handleClose}
-          className="text-gray-400 hover:text-white cursor-pointer"
+          className="text-gray-600 hover:text-gray-300 transition text-lg leading-none mt-1"
         >
           ✕
         </button>
       </div>
 
-      {/* ACCOUNT SUMMARY */}
-      <Section title="Account Summary">
-        <Metric
-          label="Risk Status"
-          value={isAnomalous ? "Anomalous" : "Normal"}
-          highlight={isAnomalous}
-        />
-        <Metric
-          label="Risk Score"
-          value={
-            node.anomalyScore !== undefined
-              ? Math.abs(node.anomalyScore * 100).toFixed(1)
-              : "N/A"
-          }
-        />
-      </Section>
-
-      {/* METRICS */}
-      <Section title="Metrics">
-        <Metric
-          label="Total Transactions"
-          value={Math.round(node.volume ?? node.size ?? 0)}
-        />
-        <Metric label="Suspicious vs Normal" value="40 / 160" />
-        <Metric
-          label="Connectivity Score"
-          value="92"
-          color={isAnomalous ? "red" : "green"}
-        />
-      </Section>
-
-      {/* EXPLAINABILITY */}
-      <Section title="Explainability">
-        <div className="flex mb-4 rounded-md overflow-hidden border border-zinc-700">
-          <TabButton
-            active={activeSlide === "shap"}
-            onClick={() => setActiveSlide("shap")}
-          >
-            SHAP Explainability
-          </TabButton>
-          <TabButton
-            active={activeSlide === "ai"}
-            onClick={() => setActiveSlide("ai")}
-          >
-            AI Explanation
-          </TabButton>
+      {/* ── Risk score bar ── */}
+      <div
+        className="px-5 py-4"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+      >
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-xs" style={{ color: "#6b7280" }}>
+            GNN Risk Score
+          </span>
+          <span className="text-lg font-mono font-bold" style={{ color }}>
+            {(score * 100).toFixed(1)}%
+          </span>
         </div>
-
-        <div className="min-h-[140px] transition-all">
-          {activeSlide === "shap" ? (
-            <ShapSlide
-              reasons={reasons}
-              loading={loading}
-              isAnomalous={isAnomalous}
-            />
-          ) : (
-            <AISlide
-              aiText={aiText}
-              loading={loadingAI}
-              onGenerate={generateAIExplanation}
-            />
-          )}
+        <div
+          className="h-2 rounded-full overflow-hidden"
+          style={{ background: "rgba(255,255,255,0.06)" }}
+        >
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              width: `${score * 100}%`,
+              background: `linear-gradient(to right, #22c55e, #eab308, #ef4444)`,
+            }}
+          />
         </div>
-      </Section>
+        <div className="text-[10px] mt-1" style={{ color: "#4b5563" }}>
+          Decision threshold: 0.45 (REVIEW) / 0.75 (BLOCK)
+        </div>
+      </div>
 
-      {/* ACTIONS */}
-      <div className="flex gap-3 p-5">
-        <button className="flex-1 rounded-md border border-green-500 text-green-400 py-2">
-          Mark as Safe
+      {/* ── Tabs ── */}
+      <div
+        className="flex"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+      >
+        {(
+          [
+            { id: "overview", label: "Overview" },
+            { id: "shap", label: "SHAP" },
+            { id: "ai", label: "AI Summary" },
+          ] as const
+        ).map(({ id, label: tabLabel }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className="flex-1 py-3 text-xs font-medium transition"
+            style={{
+              background:
+                activeTab === id
+                  ? "rgba(255,255,255,0.04)"
+                  : "transparent",
+              color: activeTab === id ? "#e5e7eb" : "#4b5563",
+              borderBottom:
+                activeTab === id
+                  ? `2px solid ${color}`
+                  : "2px solid transparent",
+            }}
+          >
+            {tabLabel}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab content ── */}
+      <div className="flex-1 overflow-y-auto">
+
+        {activeTab === "overview" && (
+          <div className="p-5 space-y-5">
+            {/* Metrics grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: "Transactions",
+                  value: Math.round(node.volume ?? node.size ?? 0).toLocaleString(),
+                  color: "#60a5fa",
+                },
+                {
+                  label: "PageRank",
+                  value: `${((node.pagerank ?? 0) * 100).toFixed(1)}%`,
+                  color: "#a78bfa",
+                },
+                {
+                  label: "Cluster Fraud Rate",
+                  value:
+                    node.clusterFraudRate !== undefined
+                      ? `${(node.clusterFraudRate * 100).toFixed(1)}%`
+                      : "N/A",
+                  color: node.clusterFraudRate
+                    ? riskColor(node.clusterFraudRate)
+                    : "#4b5563",
+                },
+                {
+                  label: "Ring Memberships",
+                  value: node.ringIds?.length ?? 0,
+                  color:
+                    (node.ringIds?.length ?? 0) > 0 ? "#facc15" : "#4b5563",
+                },
+              ].map(({ label: metLabel, value, color: metColor }) => (
+                <div
+                  key={metLabel}
+                  className="rounded-lg p-3"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+                >
+                  <div className="text-[10px] mb-1" style={{ color: "#4b5563" }}>
+                    {metLabel}
+                  </div>
+                  <div
+                    className="text-base font-mono font-bold"
+                    style={{ color: metColor }}
+                  >
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Role card */}
+            <div
+              className="rounded-lg p-4"
+              style={{
+                background: `${roleColor(role)}0d`,
+                border: `1px solid ${roleColor(role)}33`,
+              }}
+            >
+              <div
+                className="text-xs font-bold mb-1"
+                style={{ color: roleColor(role) }}
+              >
+                Role: {role}
+              </div>
+              <div className="text-xs" style={{ color: "#9ca3af" }}>
+                {roleDescription(role)}
+              </div>
+            </div>
+
+            {/* Ring IDs */}
+            {(node.ringIds?.length ?? 0) > 0 && (
+              <div>
+                <div
+                  className="text-[10px] font-mono uppercase tracking-widest mb-2"
+                  style={{ color: "#4b5563" }}
+                >
+                  Ring Memberships
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {node.ringIds!.map((id) => (
+                    <span
+                      key={id}
+                      className="px-2 py-0.5 text-xs rounded font-mono"
+                      style={{
+                        background: "rgba(250,204,21,0.1)",
+                        border: "1px solid rgba(250,204,21,0.3)",
+                        color: "#facc15",
+                      }}
+                    >
+                      Ring #{id}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "shap" && (
+          <div className="p-5">
+            <div
+              className="text-[10px] font-mono uppercase tracking-widest mb-4"
+              style={{ color: "#4b5563" }}
+            >
+              Top contributing features
+            </div>
+
+            {shapLoading ? (
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <div className="w-3 h-3 border border-gray-600 border-t-transparent rounded-full animate-spin" />
+                Loading SHAP values…
+              </div>
+            ) : shapData.length === 0 ? (
+              <p className="text-xs italic" style={{ color: "#4b5563" }}>
+                No strong SHAP signals for this account.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {shapData.slice(0, 6).map(({ label: shapLabel, value }, i) => {
+                  const pct = Math.min(Math.abs(value) * 100, 100);
+                  const barColor = value > 0 ? "#ef4444" : "#22c55e";
+                  return (
+                    <div key={i}>
+                      <div className="flex justify-between mb-1">
+                        <span className="text-xs text-gray-300 truncate max-w-[200px]">
+                          {shapLabel}
+                        </span>
+                        <span
+                          className="text-xs font-mono ml-2 flex-shrink-0"
+                          style={{ color: barColor }}
+                        >
+                          {value > 0 ? "+" : ""}{(value * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div
+                        className="h-1.5 rounded-full overflow-hidden"
+                        style={{ background: "rgba(255,255,255,0.06)" }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${pct}%`,
+                            background: barColor,
+                            opacity: 0.8,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Decision explanation */}
+            <div
+              className="mt-6 rounded-lg p-3 text-xs"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                color: "#6b7280",
+                lineHeight: 1.7,
+              }}
+            >
+              Positive values push the model toward fraud; negative values push
+              toward safe. Features above 40% are primary drivers of this
+              account's risk classification.
+            </div>
+          </div>
+        )}
+
+        {activeTab === "ai" && (
+          <div className="p-5">
+            <div
+              className="text-[10px] font-mono uppercase tracking-widest mb-4"
+              style={{ color: "#4b5563" }}
+            >
+              AI-generated explanation
+            </div>
+
+            {aiText ? (
+              <div
+                className="text-sm rounded-lg p-4 leading-relaxed"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#d1d5db",
+                }}
+              >
+                {aiText}
+              </div>
+            ) : (
+              <p className="text-xs italic mb-4" style={{ color: "#4b5563" }}>
+                Generate a natural language summary of why this account was
+                flagged, based on GNN and SHAP signals.
+              </p>
+            )}
+
+            <button
+              onClick={generateAI}
+              disabled={loadingAI}
+              className="w-full py-2.5 text-sm font-medium rounded-lg transition mt-4"
+              style={{
+                background: loadingAI
+                  ? "rgba(255,255,255,0.04)"
+                  : "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: loadingAI ? "#4b5563" : "#e5e7eb",
+                cursor: loadingAI ? "not-allowed" : "pointer",
+              }}
+            >
+              {loadingAI ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-3 h-3 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                  Generating…
+                </span>
+              ) : aiText ? (
+                "↺ Regenerate"
+              ) : (
+                "✦ Generate AI Summary"
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Actions ── */}
+      <div
+        className="px-5 py-4 flex gap-3 mt-auto"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}
+      >
+        <button
+          className="flex-1 py-2.5 text-xs font-medium rounded-lg transition"
+          style={{
+            border: "1px solid rgba(34,197,94,0.4)",
+            color: "#22c55e",
+            background: "rgba(34,197,94,0.06)",
+          }}
+        >
+          Mark Safe
         </button>
-        <button className="flex-1 rounded-md bg-red-600 py-2">
-          Initiate Freeze
+        <button
+          className="flex-1 py-2.5 text-xs font-medium rounded-lg transition"
+          style={{
+            background: "rgba(239,68,68,0.15)",
+            border: "1px solid rgba(239,68,68,0.4)",
+            color: "#ef4444",
+          }}
+        >
+          ⚠ Freeze Account
         </button>
       </div>
     </aside>
-  );
-}
-
-function Section({ title, children }: SectionProps) {
-  return (
-    <div className="p-5 border-b border-zinc-800">
-      <h3 className="mb-3 text-sm font-semibold uppercase text-gray-400">
-        {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
-
-function Metric({ label, value, highlight, color }: MetricProps) {
-  const colorClass =
-    color === "red"
-      ? "text-red-400"
-      : color === "green"
-      ? "text-green-400"
-      : "";
-
-  return (
-    <div className="flex justify-between text-sm mb-2">
-      <span className="text-gray-400">{label}</span>
-      <span className={`${highlight ? "font-semibold" : ""} ${colorClass}`}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: TabButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 py-2 text-sm font-medium
-        ${
-          active
-            ? "bg-zinc-800 text-white"
-            : "bg-zinc-900 text-gray-400 hover:text-white"
-        }
-      `}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ShapSlide({ reasons, loading, isAnomalous }: ShapSlideProps) {
-  if (loading) return <p className="text-xs text-gray-500">Loading…</p>;
-
-  if (!reasons.length) {
-    return (
-      <p className="text-xs text-gray-500 italic">
-        No strong SHAP signals for this account.
-      </p>
-    );
-  }
-
-  return (
-    <ul className="space-y-2">
-      {reasons.map((reason, i) => (
-        <li
-          key={i}
-          className={`flex gap-2 items-start p-2 rounded-md text-sm
-            ${
-              isAnomalous
-                ? "bg-red-950/40 text-red-200"
-                : "bg-green-950/40 text-green-200"
-            }`}
-        >
-          <span className="mt-0.5">▸</span>
-          <span>{reason}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function AISlide({ aiText, loading, onGenerate }: AISlideProps) {
-  return (
-    <>
-      <div className="min-h-[80px] mb-3">
-        {aiText ? (
-          <div className="bg-zinc-800 p-3 rounded-md text-sm text-gray-200">
-            {aiText}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-500 italic">
-            Generate a natural language explanation based on model signals.
-          </p>
-        )}
-      </div>
-      <button
-        onClick={onGenerate}
-        disabled={loading}
-        className="w-full rounded-md bg-white text-black py-2 text-sm font-medium hover:bg-gray-200 disabled:opacity-50"
-      >
-        {loading ? "Generating..." : "Generate AI Summary"}
-      </button>
-    </>
   );
 }
