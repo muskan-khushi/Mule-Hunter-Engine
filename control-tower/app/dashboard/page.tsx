@@ -2103,20 +2103,8 @@ export default function FraudDashboard() {
         ))}
       </nav>
 
-      <div className="mt-4 pt-4 border-t border-white/[0.07] px-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[9px] text-white/60 uppercase tracking-widest font-bold">GNN</span>
-          <span className="text-[9px] text-[#CAFF33]/70 font-mono">:8001</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-[9px] text-white/60 uppercase tracking-widest font-bold">EIF</span>
-          <span className="text-[9px] text-purple-400/70 font-mono">:8000</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-[9px] text-white/60 uppercase tracking-widest font-bold">API</span>
-          <span className="text-[9px] text-blue-400/70 font-mono">:8082</span>
-        </div>
-      </div>
+      
+     
     </>
   );
 

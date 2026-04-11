@@ -13,7 +13,8 @@ const Navbar = () => {
   const { data: session, status } = useSession();
 
   const handleLoginClick = () => {
-    router.push("/login");
+    // open login in new tab
+    window.open("/login", "_blank");
   };
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
@@ -83,21 +84,35 @@ const Navbar = () => {
 
 const NavContent = ({ session, onLinkClick }: { session: any, onLinkClick?: () => void }) => (
   <>
-    <Link href="/" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Home</Link>
-    
+    <Link href="/"  onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+      Home
+    </Link>
 
-    <Link href="/demo" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Demo</Link>
-    <Link href="/dashboard" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+    <Link href="/demo" target="_blank" rel="noopener noreferrer" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+      Demo
+    </Link>
+
+    <Link href="/dashboard" target="_blank" rel="noopener noreferrer" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
       Fraud Dashboard
     </Link>
 
-    <Link href="/network" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Network</Link>
-    <Link href="/stats" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Stats</Link>
-    <Link href="/service" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">Request Service</Link>
+    <Link href="/network" target="_blank" rel="noopener noreferrer" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+      Network
+    </Link>
+
+    <Link href="/stats" target="_blank" rel="noopener noreferrer" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+      Stats
+    </Link>
+
+    <Link href="/service" target="_blank" rel="noopener noreferrer" onClick={onLinkClick} className="hover:text-[#CAFF33] transition-colors">
+      Request Service
+    </Link>
     
     {session?.user?.role === "admin" && (
       <Link 
-        href="/admin" 
+        href="/admin"
+        target="_blank"
+        rel="noopener noreferrer"
         onClick={onLinkClick}
         className="hover:text-[#CAFF33] transition-colors underline underline-offset-4 decoration-1"
       >
